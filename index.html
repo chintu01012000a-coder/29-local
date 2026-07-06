@@ -26,8 +26,9 @@
   .row{display:flex;gap:8px;flex-wrap:wrap;}
   .col{display:flex;flex-direction:column;gap:8px;}
   .center{text-align:center;}
-  .table{position:relative;display:grid;grid-template-columns:1fr 2fr 1fr;grid-template-rows:auto auto auto;grid-template-areas:". top ." "left mid right" ". bottom .";gap:10px;align-items:center;margin:18px 0;}
-  .trump-corner{position:absolute;top:-14px;right:-6px;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;width:78px;height:107px;border-radius:10px;background:var(--ivory);box-shadow:0 3px 0 rgba(0,0,0,0.3);font-family:'Fraunces',serif;font-weight:700;}
+  .table{display:grid;grid-template-columns:1fr 2fr 1fr;grid-template-rows:auto auto auto;grid-template-areas:". top ." "left mid right" ". bottom .";gap:10px;align-items:center;margin:18px 0;}
+  .scoreboard-wrap{position:relative;}
+  .trump-corner{position:absolute;top:-14px;right:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;width:78px;height:107px;border-radius:10px;background:var(--ivory);box-shadow:0 3px 0 rgba(0,0,0,0.3);font-family:'Fraunces',serif;font-weight:700;}
   .trump-corner .rank{font-size:22px;color:var(--ink);line-height:1;}
   .trump-corner .suit{font-size:40px;line-height:1;}
   .seat{text-align:center;padding:8px;border-radius:10px;}
@@ -224,7 +225,7 @@ function onRoomChange(){
     const seat=seatToAct(); const p=room.players[seat];
     if(p && isBotUid(p.uid) && myUid===room.hostUid && !botMoving){
       botMoving=true;
-      setTimeout(()=>{ doBotPlay(p.uid, seat).finally(()=>{botMoving=false;}); }, 500);
+      setTimeout(()=>{ doBotPlay(p.uid, seat).finally(()=>{ botMoving=false; onRoomChange(); }); }, 500);
     }
   }
   if(room.phase==='playing' && (room.currentTrick||[]).length===4 && once('trickfull-'+room.round+'-'+room.trickNum)){
@@ -400,11 +401,15 @@ function renderWaiting(){
 }
 
 function renderGame(){
+  const trumpCornerHtml = room.trumpSuit ? (function(){const si=suitInfo(room.trumpSuit);return `<div class="trump-corner"><div class="rank">K</div><div class="suit" style="color:${si.red?'var(--danger)':'var(--ink)'};">${si.sym}</div></div>`;})() : '';
   let html=`<h1>Call Break</h1>
   <div class="sub" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
     <span>Round ${room.round} \u00b7 dealer ${room.players[room.dealerSeat]?.name||'?'}</span>${room.trumpSuit?'':'<span class="sub" style="margin:0;">Trump not set</span>'}
   </div>
-  <div class="scoreboard">${room.players.map(p=>`<div class="scorebox"><div class="l">${p.name}</div><div class="n">${(room.scores&&room.scores[p.uid])||0}</div></div>`).join('')}</div>`;
+  <div class="scoreboard-wrap">
+    ${trumpCornerHtml}
+    <div class="scoreboard">${room.players.map(p=>`<div class="scorebox"><div class="l">${p.name}</div><div class="n">${(room.scores&&room.scores[p.uid])||0}</div></div>`).join('')}</div>
+  </div>`;
 
   const active=(room.phase==='playing' && (room.currentTrick||[]).length<4) ? seatToAct() : -1;
   const showSideOf = room.phase!=='trump' && room.phase!=='cancelled' && room.phase!=='waiting';
@@ -421,10 +426,7 @@ function renderGame(){
   const trickHtml=(room.currentTrick||[]).map(e=>{const si=suitInfo(e.card.suit);const pl=room.players[e.seat];return `<div class="center"><div class="card">${rankLabel(e.card.rank)}<span style="color:${si.red?'var(--danger)':'inherit'};">${si.sym}</span></div><div class="seatinfo">${pl?pl.name:''}</div></div>`;}).join('');
   const midContent = (room.phase==='playing'||room.phase==='reveal') ? `<div class="row" style="justify-content:center;min-height:70px;align-items:center;">${trickHtml||'<span class="sub" style="margin:0;">trick in progress</span>'}</div>` : (room.phase==='cancelled'?`<div class="sub" style="color:var(--danger);margin:0;">round cancelled</div>`:`<div class="sub" style="margin:0;">table</div>`);
 
-  const trumpCornerHtml = room.trumpSuit ? (function(){const si=suitInfo(room.trumpSuit);return `<div class="trump-corner"><div class="rank">K</div><div class="suit" style="color:${si.red?'var(--danger)':'var(--ink)'};">${si.sym}</div></div>`;})() : '';
-
   html+=`<div class="table">
-    ${trumpCornerHtml}
     <div style="grid-area:top;">${seatBox((2+mySeat())%4)}</div>
     <div style="grid-area:left;">${seatBox((3+mySeat())%4)}</div>
     <div style="grid-area:mid;">${midContent}</div>

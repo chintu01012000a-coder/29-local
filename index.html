@@ -23,16 +23,16 @@
   .card{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;width:72px;height:99px;border-radius:10px;background:var(--ivory);color:var(--ink);font-family:'Fraunces',serif;font-weight:600;font-size:23px;cursor:pointer;box-shadow:0 2px 0 rgba(0,0,0,0.25);}
   .card.disabled{opacity:0.3;cursor:not-allowed;}
   .card.back{background:var(--felt-light);color:var(--muted);font-size:27px;border:1px dashed var(--muted);}
-  .row{display:flex;gap:8px;flex-wrap:wrap;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;}
   .col{display:flex;flex-direction:column;gap:8px;}
   .center{text-align:center;}
   .table{display:grid;grid-template-columns:1fr 2fr 1fr;grid-template-rows:auto auto auto;grid-template-areas:". top ." "left mid right" ". bottom .";gap:10px;align-items:center;margin:18px 0;}
-  .trickgrid{position:relative;width:100%;min-height:190px;}
-  .trickslot{position:absolute;text-align:center;}
-  .trickslot.top{top:0;left:50%;transform:translateX(-50%);}
-  .trickslot.bottom{bottom:0;left:50%;transform:translateX(-50%);}
-  .trickslot.left{left:0;top:50%;transform:translateY(-50%);}
-  .trickslot.right{right:0;top:50%;transform:translateY(-50%);}
+  .trickgrid{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto auto;grid-template-areas:". top ." "left center right" ". bottom .";gap:12px;align-items:center;justify-items:center;min-height:210px;}
+  .trickslot{text-align:center;}
+  .trickslot.top{grid-area:top;}
+  .trickslot.bottom{grid-area:bottom;}
+  .trickslot.left{grid-area:left;}
+  .trickslot.right{grid-area:right;}
   .scoreboard-wrap{position:relative;}
   .trump-corner{position:absolute;top:-14px;right:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;width:78px;height:107px;border-radius:10px;background:var(--ivory);box-shadow:0 3px 0 rgba(0,0,0,0.3);font-family:'Fraunces',serif;font-weight:700;}
   .trump-corner .rank{font-size:22px;color:var(--ink);line-height:1;}
@@ -219,6 +219,7 @@ async function doJoin(){
 function subscribe(){
   roomRef.onSnapshot(snap=>{ room=snap.data(); onRoomChange(); });
   myHandRef.onSnapshot(snap=>{ if(snap.exists){ myHand=snap.data(); } render(); });
+  setInterval(()=>{ if(room) onRoomChange(); }, 2500);
 }
 
 function onRoomChange(){
@@ -281,30 +282,35 @@ function onRoomChange(){
 }
 
 async function performDeal(){
-  const deck=shuffle(newDeck());
-  const hands=[[],[],[],[]];
-  for(let i=0;i<4;i++) hands[i]=sortHand(deck.slice(i*13,(i+1)*13), room.trumpSuit);
-  const noTrumpVoid=hands.some(h=>h.filter(c=>c.suit===room.trumpSuit).length===0);
-  const noFaceCard=hands.some(h=>h.filter(c=>c.rank>=11).length===0);
-  const allFourAces = room.ruleMode==='local' && hands.some(h=>SUITS.every(s=>h.some(c=>c.suit===s.key&&c.rank===14)));
-  if(noTrumpVoid||noFaceCard||allFourAces){
-    const reason = noTrumpVoid?'a player had no trump cards':noFaceCard?'a player had no ace, king, queen, or jack':'a player was dealt all four Aces';
-    await roomRef.update({phase:'cancelled', cancelReason: reason});
+  try{
+    const deck=shuffle(newDeck());
+    const hands=[[],[],[],[]];
+    for(let i=0;i<4;i++) hands[i]=sortHand(deck.slice(i*13,(i+1)*13), room.trumpSuit);
+    const noTrumpVoid=hands.some(h=>h.filter(c=>c.suit===room.trumpSuit).length===0);
+    const noFaceCard=hands.some(h=>h.filter(c=>c.rank>=11).length===0);
+    const allFourAces = room.ruleMode==='local' && hands.some(h=>SUITS.every(s=>h.some(c=>c.suit===s.key&&c.rank===14)));
+    if(noTrumpVoid||noFaceCard||allFourAces){
+      const reason = noTrumpVoid?'a player had no trump cards':noFaceCard?'a player had no ace, king, queen, or jack':'a player was dealt all four Aces';
+      await roomRef.update({phase:'cancelled', cancelReason: reason});
+      setTimeout(performDeal,1600);
+      return;
+    }
+    const nonTrump=SUITS.map(s=>s.key).filter(k=>k!==room.trumpSuit);
+    const sideOf={}; const tricksWon={};
+    room.players.forEach((p,i)=>{
+      sideOf[p.uid]=nonTrump.some(suit=>hands[i].filter(c=>c.suit===suit).length===0);
+      tricksWon[p.uid]=0;
+    });
+    await db.runTransaction(async tx=>{
+      const snap=await tx.get(roomRef); const d=snap.data();
+      if(d.phase!=='trump' || d.trumpSuit!==room.trumpSuit) return;
+      tx.update(roomRef, {phase:'bidding', sideOf, tricksWon, revealedBids:{}, currentTrick:[], leaderSeat:d.trumpChooserSeat, trickNum:1, readyPlayers:{}, cancelReason:''});
+      room.players.forEach((p,i)=>{ tx.set(roomRef.collection('hands').doc(p.uid), {cards:hands[i], bid:null}); });
+    });
+  }catch(e){
+    console.error('performDeal failed, retrying shortly:', e);
     setTimeout(performDeal,1600);
-    return;
   }
-  const nonTrump=SUITS.map(s=>s.key).filter(k=>k!==room.trumpSuit);
-  const sideOf={}; const tricksWon={};
-  room.players.forEach((p,i)=>{
-    sideOf[p.uid]=nonTrump.some(suit=>hands[i].filter(c=>c.suit===suit).length===0);
-    tricksWon[p.uid]=0;
-  });
-  await db.runTransaction(async tx=>{
-    const snap=await tx.get(roomRef); const d=snap.data();
-    if(d.phase!=='trump' || d.trumpSuit!==room.trumpSuit) return;
-    tx.update(roomRef, {phase:'bidding', sideOf, tricksWon, revealedBids:{}, currentTrick:[], leaderSeat:d.trumpChooserSeat, trickNum:1, readyPlayers:{}, cancelReason:''});
-    room.players.forEach((p,i)=>{ tx.set(roomRef.collection('hands').doc(p.uid), {cards:hands[i], bid:null}); });
-  });
 }
 
 async function doBotBid(uid){
@@ -432,15 +438,15 @@ async function nextRound(){
   });
 }
 
-// ---------- Rule mode ----------
 async function setRuleMode(mode){
-  await roomRef.update({ruleMode:mode});
+  const scores={}; room.players.forEach(p=>scores[p.uid]=0);
+  await roomRef.update({ruleMode:mode, scores, history:[]});
 }
 async function toggleElevenMode(){
-  await roomRef.update({elevenMode: !room.elevenMode});
+  const scores={}; room.players.forEach(p=>scores[p.uid]=0);
+  await roomRef.update({elevenMode: !room.elevenMode, scores, history:[]});
 }
 
-// ---------- Cancel-round (needs everyone's agreement) ----------
 async function requestCancelRound(){
   const newId=(room.cancelRequestId||0)+1;
   await roomRef.update({cancelRequestId:newId, cancelRequest:{id:newId, votes:{[myUid]:true}}});
@@ -459,11 +465,15 @@ async function applyCancelRound(){
   });
 }
 
-// ---------- Rendering ----------
 function render(){
   if(!room){ return; }
-  if(room.phase==='waiting'){ renderWaiting(); return; }
-  renderGame();
+  try{
+    if(room.phase==='waiting'){ renderWaiting(); return; }
+    renderGame();
+  }catch(e){
+    console.error('render failed:', e);
+    el(`<h1>Call Break Local</h1><div class="panel">Something glitched displaying this screen.<div style="height:10px;"></div><button onclick="render()">Retry</button></div>`);
+  }
 }
 
 function renderWaiting(){
@@ -517,7 +527,7 @@ function renderGame(){
     return `<div class="trickslot ${slot}"><div class="card" style="cursor:default;">${rankLabel(e.card.rank)}<span style="color:${si.red?'var(--danger)':'inherit'};">${si.sym}</span></div><div class="seatinfo">${pl?pl.name:''}</div></div>`;
   };
   const anyCard = trick.length>0;
-  const midContent = (room.phase==='playing'||room.phase==='reveal') ? `<div class="trickgrid">${anyCard? slotHtml('top')+slotHtml('left')+slotHtml('right')+slotHtml('bottom') : '<div class="center sub" style="margin:0;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);">trick in progress</div>'}</div>` : (room.phase==='cancelled'?`<div class="sub" style="color:var(--danger);margin:0;">round cancelled</div>`:`<div class="sub" style="margin:0;">table</div>`);
+  const midContent = (room.phase==='playing'||room.phase==='reveal') ? `<div class="trickgrid">${anyCard? slotHtml('top')+slotHtml('left')+slotHtml('right')+slotHtml('bottom') : '<div class="center sub" style="margin:0;grid-area:center;">trick in progress</div>'}</div>` : (room.phase==='cancelled'?`<div class="sub" style="color:var(--danger);margin:0;">round cancelled</div>`:`<div class="sub" style="margin:0;">table</div>`);
 
   html+=`<div class="table">
     <div style="grid-area:top;">${seatBox((2+mySeat())%4)}</div>
@@ -559,6 +569,9 @@ function renderControls(){
     const seat=(room.currentTrick||[]).length<4 ? seatToAct() : -1;
     const label = seat===mySeat() ? 'your turn \u2014 pick a card below' : (seat>=0 ? (room.players[seat]?.name||'?')+' is playing\u2026' : 'all four cards played \u2014 next trick starting\u2026');
     return `<div class="panel sub" style="margin:0;text-align:center;">Trick ${room.trickNum} of 13 \u00b7 ${label}</div>`;
+  }
+  if(room.phase==='collecting'){
+    return `<div class="panel sub" style="margin:0;text-align:center;">Round finished \u2014 tallying scores\u2026</div>`;
   }
   if(room.phase==='reveal'){
     const last=room.history[room.history.length-1];

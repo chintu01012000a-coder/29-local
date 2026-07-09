@@ -186,7 +186,7 @@ async function doCreate(humanCount){
     phase:'waiting', round:0, dealSeq:0, dealerSeat:0, trumpChooserSeat:1,
     trumpSuit:null, sideOf:{}, currentTrick:[], leaderSeat:0, trickNum:1,
     tricksWon:{}, scores:{}, revealedBids:{}, roundScores:{}, history:[],
-    readyPlayers:{}, cancelReason:'', ruleMode:'local', elevenMode:true
+    readyPlayers:{}, cancelReason:'', ruleMode:'local', elevenMode:true, redealAttempt:0
   });
   history.replaceState(null,'','?room='+roomId);
   subscribe();
@@ -226,6 +226,9 @@ function onRoomChange(){
   }
   if(room.phase==='trump' && room.trumpSuit){
     onceAsync('deal-'+seq, performDeal);
+  }
+  if(room.phase==='cancelled'){
+    onceAsync('redeal-'+(room.redealAttempt||0), ()=>new Promise(res=>setTimeout(()=>performDeal().then(res).catch(res), 1600)));
   }
   if(room.phase==='bidding'){
     room.players.forEach(p=>{
@@ -285,8 +288,7 @@ async function performDeal(){
     const allFourAces = room.ruleMode==='local' && hands.some(h=>SUITS.every(s=>h.some(c=>c.suit===s.key&&c.rank===14)));
     if(noTrumpVoid||noFaceCard||allFourAces){
       const reason = noTrumpVoid?'a player had no trump cards':noFaceCard?'a player had no ace, king, queen, or jack':'a player was dealt all four Aces';
-      await roomRef.update({phase:'cancelled', cancelReason: reason});
-      setTimeout(performDeal,1600);
+      await roomRef.update({phase:'cancelled', cancelReason: reason, redealAttempt:(room.redealAttempt||0)+1});
       return;
     }
     const nonTrump=SUITS.map(s=>s.key).filter(k=>k!==room.trumpSuit);
@@ -302,8 +304,8 @@ async function performDeal(){
       room.players.forEach((p,i)=>{ tx.set(roomRef.collection('hands').doc(p.uid), {cards:hands[i], bid:null}); });
     });
   }catch(e){
-    console.error('performDeal failed, retrying shortly:', e);
-    setTimeout(performDeal,1600);
+    console.error('performDeal failed:', e);
+    roomRef.update({phase:'cancelled', cancelReason:'a technical hiccup interrupted dealing', redealAttempt:(room.redealAttempt||0)+1}).catch(()=>{});
   }
 }
 

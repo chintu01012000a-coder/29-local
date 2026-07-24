@@ -1078,11 +1078,38 @@ function legalIsDiscardOnly(seat){
   if(!rd.leadSuit) return false;
   return !hand.some(c=>c.s===rd.leadSuit);
 }
+let TRUMP_ATTEMPT_MODE = false; // true = this next card tap is a deliberate trump attempt
 function presentHumanPlay(legal){
-  setPanelMsg('Your turn — tap a highlighted card to play it.');
+  const rd = G.round;
+  const isVoid = rd.leadSuit && legalIsDiscardOnly(MY_SEAT) && !rd.trumpRevealed;
+  if(isVoid){
+    setPanelMsg(`You have no ${SUIT_NAME[rd.leadSuit]}.`);
+    setPanelBtns([]);
+    setPlayable([]);
+    setCenterActions([
+      {label:'Trump', cls:'primary', fn:()=>{
+        TRUMP_ATTEMPT_MODE = true;
+        setPanelMsg('Choose one of your own cards to attempt trump with.');
+        setCenterActions([]);
+        setPlayable(legal.map(c=>c.id));
+      }},
+      {label:"Don't Trump", cls:'ghost', fn:()=>{
+        TRUMP_ATTEMPT_MODE = false;
+        setPanelMsg('Choose any card to discard safely.');
+        setCenterActions([]);
+        setPlayable(legal.map(c=>c.id));
+      }}
+    ]);
+    return;
+  }
+  TRUMP_ATTEMPT_MODE = false;
+  if(rd.leadSuit && legalIsDiscardOnly(MY_SEAT) && rd.trumpRevealed){
+    setPanelMsg(`You have no ${SUIT_NAME[rd.leadSuit]} — tap any card to play, or a ${SUIT_NAME[rd.trump]} to trump in.`);
+  } else {
+    setPanelMsg('Your turn — tap a highlighted card to play it.');
+  }
   setPanelBtns([]);
   setPlayable(legal.map(c=>c.id));
-  const rd = G.round;
   const trumpKQ = rd.hands[MY_SEAT].filter(c=>c.s===rd.trump && (c.r==='K'||c.r==='Q'));
   const myTeam = TEAM[MY_SEAT];
   const btns = [];
@@ -1099,6 +1126,7 @@ function presentHumanPlay(legal){
 function computerPlay(seat, legal){
   const rd = G.round;
   let choice;
+  let skipTrumpCheck = false;
   if(rd.leadSuit && legalIsDiscardOnly(seat)){
     const trumpsInHand = legal.filter(c=>c.s===rd.trump);
     if(seat===rd.highBidder && trumpsInHand.length>0 && !rd.trumpRevealed){
@@ -1107,18 +1135,23 @@ function computerPlay(seat, legal){
     } else if(rd.trumpRevealed && trumpsInHand.length>0 && Math.random()<0.6){
       // trump is already known to everyone — anyone can now deliberately trump in
       choice = trumpsInHand[0];
+    } else if(!rd.trumpRevealed && Math.random()<0.5){
+      // decides not to attempt trump this time — a safe discard regardless of suit
+      choice = legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
+      skipTrumpCheck = true;
     } else {
-      // void in the led suit and trump not yet known to this player — just
-      // discard a low card; if it happens to be the trump suit, that IS how
-      // trump gets discovered (no separate "guessing" step needed)
+      // attempts trump by choosing a card, not knowing whether it matches
       choice = legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
     }
   } else {
     choice = legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
   }
-  playCard(seat, choice);
+  playCard(seat, choice, {skipTrumpCheck});
 }
-function playCard(seat, card){
+function playCard(seat, card, opts){
+  opts = opts || {};
+  const skipTrumpCheck = (seat===MY_SEAT) ? !TRUMP_ATTEMPT_MODE : !!opts.skipTrumpCheck;
+  TRUMP_ATTEMPT_MODE = false;
   const rd = G.round;
   rd.hands[seat] = rd.hands[seat].filter(c=>c.id!==card.id);
   rd.current[seat] = card;
@@ -1127,10 +1160,9 @@ function playCard(seat, card){
   const hadLeadSuit = rd.leadSuit;
   if(!rd.leadSuit) rd.leadSuit = card.s;
   logMsg(`${seatLabel(seat)} plays ${card.r}${SUIT_SYM[card.s]}.`);
-  // Trump discovery: playing off the led suit is only legal if you had none of
-  // it. If that card happens to be the secret trump suit, trump is revealed —
-  // whether or not the player knew it in advance.
-  if(hadLeadSuit && card.s!==hadLeadSuit && !rd.trumpRevealed && card.s===rd.trump){
+  // Trump discovery: only checked if this was a deliberate trump attempt
+  // (or the card naturally follows the "any card counts" rule for computers/bidder).
+  if(hadLeadSuit && card.s!==hadLeadSuit && !rd.trumpRevealed && card.s===rd.trump && !skipTrumpCheck){
     rd.trumpRevealed = true;
     logMsg(`${seatLabel(seat)}'s card is the trump suit — trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}!`);
   }

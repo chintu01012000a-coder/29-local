@@ -744,6 +744,7 @@ function resumeFlow(){
     case 'bid': bidTurn(aw.seat); break;
     case 'dealerForcedBid': doDealerForcedBid(aw.seat); break;
     case 'trump': doTrumpStep(aw.seat); break;
+    case 'trumpSecondPick': doSecondOptionStep(aw.seat); break;
     case 'singles': doSinglesStep(aw.seat); break;
     case 'double': doDoubleStep(aw.seat); break;
     case 'play': playTurn(aw.seat); break;
@@ -899,21 +900,34 @@ function startSecondOption(){
   const rd = G.round;
   const cards = rd.deck.splice(0,4);
   rd.pendingSecondOption = cards;
+  rd.awaiting = {type:'trumpSecondPick', seat: MY_SEAT};
   logMsg(`${seatLabel(MY_SEAT)} is choosing trump using the "2nd" option.`);
   announce(`${seatLabel(MY_SEAT)} is choosing trump via the "2nd" option`);
   pushState();
-  presentSecondOptionPicker(cards);
+  doSecondOptionStep(MY_SEAT);
 }
-function presentSecondOptionPicker(cards){
+function doSecondOptionStep(seat){
+  if(!authorizedFor(seat)){
+    clearDecisionUI();
+    setPanelMsg(`Waiting for ${seatLabel(seat)} to pick a face-down card...`);
+    return;
+  }
+  if(seat!==MY_SEAT) return; // "2nd" is human-only; nothing for the host to drive here
+  presentSecondOptionPicker();
+}
+function presentSecondOptionPicker(){
+  const cards = G.round.pendingSecondOption;
+  if(!cards){ return; } // already resolved (e.g. a duplicate dispatch) — nothing to show
   setPanelMsg('Pick one face-down card to secretly set your trump suit.');
   const btns = cards.map((c,i)=>({label:`Face-Down Card ${i+1}`, cls:'ghost', fn:()=>{
     hideOverlay();
-    finishSecondOption(cards, i);
+    finishSecondOption(i);
   }}));
   showOverlay('Choose a Face-Down Card', 'One of these four cards will secretly become your trump suit.', btns);
 }
-function finishSecondOption(cards, idx){
-  const rd = G.round;
+function finishSecondOption(idx){
+  const rd = G.round; // fresh — do not rely on any closured reference from earlier
+  const cards = rd.pendingSecondOption;
   const chosen = cards[idx];
   rd.trump = chosen.s;
   rd.trumpRevealed = false;
@@ -1080,45 +1094,7 @@ function presentHumanPlay(legal){
       presentHumanPlay(legal);
     }});
   }
-  if(rd.leadSuit && legal.some(c=>c.s!==rd.leadSuit) && legalIsDiscardOnly(MY_SEAT) && !rd.trumpRevealed && rd.highBidder!==MY_SEAT){
-    btns.push({label:'Guess Trump Suit', cls:'ghost', fn:()=>offerTrumpGuess(MY_SEAT)});
-  }
   setCenterActions(btns);
-}
-function offerTrumpGuess(seat){
-  setCenterActions([]);
-  const btns = SUITS.map(s=>({label:`${SUIT_SYM[s]} ${SUIT_NAME[s]}`, cls:'suit-'+s, fn:()=>{ hideOverlay(); resolveTrumpGuess(seat,s); }}));
-  btns.push({label:'Cancel', cls:'ghost', fn:()=>{ hideOverlay(); presentHumanPlay(legalCards(seat)); }});
-  showOverlay('Guess the Trump Suit', 'Guess right and you trump into this trick. Guess wrong and you must discard normally.', btns);
-}
-function resolveTrumpGuess(seat, guess){
-  const rd = G.round;
-  if(guess===rd.trump){
-    logMsg(`${seatLabel(seat)} guessed the trump suit correctly! Trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}.`);
-    rd.trumpRevealed = true;
-    const trumpCards = rd.hands[seat].filter(c=>c.s===rd.trump);
-    if(seat===MY_SEAT){
-      pushState();
-      setPlayable(trumpCards.map(c=>c.id));
-      setPanelMsg('Correct! Choose your trump card to play.');
-      setPanelBtns([]);
-    } else {
-      const pick = trumpCards[Math.floor(Math.random()*trumpCards.length)];
-      playCard(seat, pick);
-    }
-  } else {
-    logMsg(`${seatLabel(seat)} guessed wrong — must discard normally.`);
-    if(seat===MY_SEAT){
-      pushState();
-      setPlayable(rd.hands[MY_SEAT].filter(c=>c.s!==rd.leadSuit).map(c=>c.id));
-      setPanelMsg('Wrong guess — pick any card to discard.');
-      setPanelBtns([]);
-    } else {
-      const discardable = rd.hands[seat].filter(c=>c.s!==rd.leadSuit);
-      const pick = discardable[Math.floor(Math.random()*discardable.length)];
-      playCard(seat, pick);
-    }
-  }
 }
 function computerPlay(seat, legal){
   const rd = G.round;
@@ -1126,18 +1102,16 @@ function computerPlay(seat, legal){
   if(rd.leadSuit && legalIsDiscardOnly(seat)){
     const trumpsInHand = legal.filter(c=>c.s===rd.trump);
     if(seat===rd.highBidder && trumpsInHand.length>0 && !rd.trumpRevealed){
+      // the bidder knows their own secret trump suit and can deliberately play it
       choice = trumpsInHand[0];
-      rd.trumpRevealed = true;
-      logMsg(`${seatLabel(seat)} plays a trump — trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}.`);
-    } else if(seat!==rd.highBidder && !rd.trumpRevealed && Math.random()<0.25){
-      const guess = SUITS[Math.floor(Math.random()*4)];
-      resolveTrumpGuess(seat, guess);
-      return;
     } else if(rd.trumpRevealed && trumpsInHand.length>0 && Math.random()<0.6){
+      // trump is already known to everyone — anyone can now deliberately trump in
       choice = trumpsInHand[0];
     } else {
-      const nonTrump = legal.filter(c=>c.s!==rd.trump);
-      choice = (nonTrump.length? nonTrump: legal)[0];
+      // void in the led suit and trump not yet known to this player — just
+      // discard a low card; if it happens to be the trump suit, that IS how
+      // trump gets discovered (no separate "guessing" step needed)
+      choice = legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
     }
   } else {
     choice = legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
@@ -1150,8 +1124,16 @@ function playCard(seat, card){
   rd.current[seat] = card;
   rd.playOrder = rd.playOrder || [];
   rd.playOrder.push(seat);
+  const hadLeadSuit = rd.leadSuit;
   if(!rd.leadSuit) rd.leadSuit = card.s;
   logMsg(`${seatLabel(seat)} plays ${card.r}${SUIT_SYM[card.s]}.`);
+  // Trump discovery: playing off the led suit is only legal if you had none of
+  // it. If that card happens to be the secret trump suit, trump is revealed —
+  // whether or not the player knew it in advance.
+  if(hadLeadSuit && card.s!==hadLeadSuit && !rd.trumpRevealed && card.s===rd.trump){
+    rd.trumpRevealed = true;
+    logMsg(`${seatLabel(seat)}'s card is the trump suit — trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}!`);
+  }
   const playedSeats = Object.keys(rd.current).map(Number);
   const outCount = rd.singles!=null ? 1 : 0;
   if(playedSeats.length + outCount === 4){

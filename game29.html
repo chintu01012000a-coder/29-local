@@ -102,6 +102,7 @@ body{
 }
 .pod .lbl{font-size:9px; letter-spacing:1px; opacity:0.7; text-transform:uppercase;}
 .pod .val{font-family:'Cinzel',serif; font-size:18px; font-weight:700; color:var(--gold-soft);}
+.pod .val::before{content:"❤️ "; font-size:14px;}
 .menubtn{
   background:none; border:1px solid var(--line); color:var(--cream);
   border-radius:7px; padding:5px 9px; font-size:11px; font-family:'Inter';
@@ -135,6 +136,7 @@ body{
 }
 .seat.active .name{ border-color:var(--gold); color:var(--gold-soft); box-shadow:0 0 10px rgba(201,162,39,0.35);}
 .seat.bidder .name::after{content:" ★"; color:var(--gold-soft);}
+.seat.dealer .name::before{content:"D "; color:var(--teal); font-weight:800; background:var(--gold-soft); border-radius:50%; padding:0 4px; margin-right:2px;}
 .seat .cardback-row{display:flex;}
 .cardback{
   width:22px; height:31px; margin-left:-13px; border-radius:4px;
@@ -162,7 +164,8 @@ body{
 #slotRight{ right:6px; top:50%; transform:translateY(-50%);}
 
 .trumpseed{
-  position:absolute; top:-10px; right:-10px; width:45px; height:63px; border-radius:7px;
+  position:absolute; top:100%; left:50%; transform:translateX(-50%); margin-top:6px;
+  width:45px; height:63px; border-radius:7px;
   background:linear-gradient(135deg, #3a2b0e, #1c1712);
   border:2px solid var(--gold);
   display:flex; align-items:center; justify-content:center;
@@ -170,6 +173,7 @@ body{
   z-index:17;
 }
 .trumpseed.revealed{ background:var(--cream); color:var(--ink); }
+.trumpseed.attach-above{ top:auto; bottom:100%; margin-top:0; margin-bottom:6px; }
 .centerActions{
   position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:16;
   display:flex; flex-direction:column; gap:6px; align-items:center;
@@ -191,20 +195,20 @@ body{
 .handzone{ display:flex; flex-direction:column; justify-content:flex-end; padding-bottom:6px;}
 .hand{
   display:flex; flex-wrap:wrap; justify-content:center; align-content:flex-end;
-  gap:6px 5px; padding:4px 10px; max-width:352px; margin:0 auto;
+  gap:5px 4px; padding:4px 6px; max-width:320px; margin:0 auto;
 }
 .card{
-  width:80px; height:120px; background:var(--cream); border-radius:10px;
+  width:72px; height:106px; background:var(--cream); border-radius:9px;
   box-shadow:0 3px 7px rgba(0,0,0,0.4);
   border:1px solid rgba(0,0,0,0.15); flex-shrink:0;
-  display:flex; flex-direction:column; justify-content:space-between; padding:6px 7px;
+  display:flex; flex-direction:column; justify-content:space-between; padding:5px 6px;
   color:var(--ink); font-weight:700; position:relative; transition: transform .15s ease;
 }
 .card.red{color:var(--red);}
 .card.playable{ transform:translateY(-10px); box-shadow:0 8px 14px rgba(0,0,0,0.5);}
 .card.disabled{ filter:grayscale(0.6) brightness(0.75);}
-.card .rank{font-size:16px; font-family:'Cinzel',serif;}
-.card .suit{font-size:24px; align-self:center;}
+.card .rank{font-size:14px; font-family:'Cinzel',serif;}
+.card .suit{font-size:21px; align-self:center;}
 .card .rank.bottom{ align-self:flex-end; transform:rotate(180deg); }
 
 .trickcard{ width:52px; height:74px; }
@@ -223,13 +227,24 @@ body{
 .btn.suit-H,.btn.suit-D{color:#ffb3b3;}
 
 .log{
-  position:absolute; top:64px; right:6px; width:220px; max-height:200px; overflow:auto;
-  background:rgba(0,0,0,0.85); border:1px solid var(--line); border-radius:8px; padding:8px;
-  font-size:11px; line-height:1.5; z-index:40; display:none;
+  position:absolute; inset:0; width:auto; max-height:none; overflow:auto;
+  background:rgba(6,20,15,0.98); border:none; border-radius:0; padding:0;
+  font-size:14px; line-height:1.8; z-index:70; display:none;
 }
 .log.show{display:block;}
+.logHeader{
+  position:sticky; top:0; display:flex; align-items:center; justify-content:space-between;
+  background:rgba(0,0,0,0.95); margin:0; padding:14px 16px;
+  border-bottom:2px solid var(--gold); font-family:'Cinzel',serif; color:var(--gold-soft); font-size:17px;
+}
+.logClose{
+  background:none; border:1px solid var(--gold); color:var(--cream); border-radius:8px;
+  width:36px; height:36px; font-size:16px; line-height:1; cursor:pointer;
+}
+#logLines{ padding:14px 16px 40px; }
+#logLines > div{ padding:7px 0; border-bottom:1px solid var(--line); }
 .overlay{
-  position:absolute; top:0; left:0; right:0; bottom:250px; background:rgba(0,0,0,0.55); z-index:50;
+  position:absolute; top:0; left:0; right:0; bottom:235px; background:rgba(0,0,0,0.55); z-index:50;
   display:flex; align-items:center; justify-content:center;
 }
 .overlay .card2{
@@ -237,7 +252,7 @@ body{
   padding:22px 24px; max-width:320px; max-height:85vh; overflow-y:auto; text-align:center;
 }
 .overlay h2{font-family:'Cinzel',serif; color:var(--gold-soft); margin:0 0 8px;}
-.overlay p{font-size:13px; opacity:0.9; line-height:1.5;}
+.overlay p{font-size:13px; opacity:0.9; line-height:1.5; white-space:pre-line;}
 .hidden{display:none !important;}
 </style>
 </head>
@@ -341,7 +356,13 @@ body{
     <div class="hand" id="handRow"></div>
   </div>
 
-  <div class="log" id="logBox"></div>
+  <div class="log" id="logBox">
+    <div class="logHeader">
+      <span>Log</span>
+      <button class="logClose" id="logClose">✕</button>
+    </div>
+    <div id="logLines"></div>
+  </div>
 
   <div class="panel">
     <div class="msg" id="panelMsg">—</div>
@@ -745,7 +766,7 @@ function resumeFlow(){
     case 'dealerForcedBid': doDealerForcedBid(aw.seat); break;
     case 'trump': doTrumpStep(aw.seat); break;
     case 'trumpSecondPick': doSecondOptionStep(aw.seat); break;
-    case 'singles': doSinglesStep(aw.seat); break;
+    case 'singlesOffer': doSinglesOfferStep(aw.seat); break;
     case 'double': doDoubleStep(aw.seat); break;
     case 'play': playTurn(aw.seat); break;
     case 'redealAck': showRedealOverlay(); break;
@@ -810,6 +831,15 @@ function advanceBid(seat){
   if(passedSet.size===4){ bidTurn(nextSeat(seat)); return; }
   bidTurn(nextSeat(seat));
 }
+function biddingStatusText(){
+  const rd = G.round;
+  return [0,1,2,3].map(seat=>{
+    const name = seat===MY_SEAT ? 'You' : seatLabel(seat);
+    if(rd.passed.includes(seat)) return `${name}: Passed`;
+    if(rd.highBidder===seat) return `${name}: Bid ${rd.highBid} ★`;
+    return `${name}: Deciding...`;
+  }).join('\n');
+}
 function presentHumanBid(){
   const rd = G.round;
   const minBid = minAcceptableBid(MY_SEAT);
@@ -835,9 +865,10 @@ function presentHumanBid(){
     advanceBid(MY_SEAT);
     pushState();
   }});
-  const explain = isReclaim
+  const explain = (isReclaim
     ? `Current high bid: ${rd.highBid}. You started this auction, so you can re-claim it at ${rd.highBid} or bid higher.`
-    : `Current high bid: ${rd.highBid||'none'}. You must bid higher, or pass.`;
+    : `Current high bid: ${rd.highBid||'none'}. You must bid higher, or pass.`)
+    + '\n\n' + biddingStatusText();
   showOverlay('Your Bid', explain, btns);
 }
 function finishBidding(){
@@ -866,7 +897,7 @@ function doDealerForcedBid(seat){
         finishBidding();
       }});
     }
-    showOverlay('Everyone Passed', 'As dealer, you must choose a bid between 16 and 28 — you cannot pass.', btns);
+    showOverlay('Everyone Passed', 'As dealer, you must choose a bid between 16 and 28 — you cannot pass.\n\n'+biddingStatusText(), btns);
     return;
   }
   // computer dealer: forced to pick something, so just use their comfort estimate (floor 16)
@@ -919,11 +950,21 @@ function presentSecondOptionPicker(){
   const cards = G.round.pendingSecondOption;
   if(!cards){ return; } // already resolved (e.g. a duplicate dispatch) — nothing to show
   setPanelMsg('Pick one face-down card to secretly set your trump suit.');
-  const btns = cards.map((c,i)=>({label:`Face-Down Card ${i+1}`, cls:'ghost', fn:()=>{
-    hideOverlay();
-    finishSecondOption(i);
-  }}));
-  showOverlay('Choose a Face-Down Card', 'One of these four cards will secretly become your trump suit.', btns);
+  document.getElementById('ovTitle').textContent = 'Choose a Face-Down Card';
+  document.getElementById('ovText').textContent = 'Tap one — it will secretly become your trump suit.';
+  const row = document.getElementById('ovBtns');
+  row.innerHTML = '';
+  const cardRow = document.createElement('div');
+  cardRow.style.cssText = 'display:flex; gap:8px; justify-content:center; margin:8px 0;';
+  cards.forEach((c,i)=>{
+    const cb = document.createElement('div');
+    cb.className = 'cardback';
+    cb.style.cssText = 'width:52px; height:74px; margin-left:0; cursor:pointer; border-width:2px;';
+    cb.addEventListener('click', ()=>{ finishSecondOption(i); });
+    cardRow.appendChild(cb);
+  });
+  row.appendChild(cardRow);
+  document.getElementById('overlay').classList.remove('hidden');
 }
 function finishSecondOption(idx){
   const rd = G.round; // fresh — do not rely on any closured reference from earlier
@@ -935,8 +976,20 @@ function finishSecondOption(idx){
   rd.secondOptionSeat = MY_SEAT;
   rd.pendingSecondOption = null;
   logMsg(`${seatLabel(MY_SEAT)} secretly set trump via the "2nd" option.`);
-  showOverlay('Your Trump Suit', `Your trump suit is ${SUIT_SYM[chosen.s]} ${SUIT_NAME[chosen.s]} — only you know this until it's revealed in play.`,
-    [{label:'Got it', cls:'primary', fn:()=>{ hideOverlay(); dealRemaining(); }}]);
+  document.getElementById('ovTitle').textContent = 'Your Trump Card';
+  document.getElementById('ovText').textContent = `Your trump suit is now ${SUIT_NAME[chosen.s]} — only you know this until it's revealed in play.`;
+  const row = document.getElementById('ovBtns');
+  row.innerHTML = '';
+  const cardWrap = document.createElement('div');
+  cardWrap.style.cssText = 'display:flex; justify-content:center; margin:8px 0;';
+  cardWrap.appendChild(cardEl(chosen, 'trickcard'));
+  row.appendChild(cardWrap);
+  const btn = document.createElement('button');
+  btn.className = 'btn primary';
+  btn.textContent = 'Continue';
+  btn.style.marginTop = '6px';
+  btn.addEventListener('click', ()=>{ hideOverlay(); dealRemaining(); });
+  row.appendChild(btn);
 }
 function setTrump(suit){
   const rd = G.round;
@@ -974,13 +1027,17 @@ function dealRemaining(){
     return;
   }
 
-  rd.awaiting = {type:'singles', seat: rd.highBidder};
+  rd.awaiting = {type:'singlesOffer', seat: rd.first};
+  rd.singlesAskedCount = 0;
   pushState();
-  doSinglesStep(rd.highBidder);
+  doSinglesOfferStep(rd.first);
 }
 
 /* ---------------- SINGLES / DOUBLE ---------------- */
-function doSinglesStep(seat){
+// Singles is NOT restricted to the bidder — any of the four players may offer
+// to play it. Players are asked in turn order; whoever says yes FIRST gets it,
+// and nobody else is asked once someone has taken it.
+function doSinglesOfferStep(seat){
   if(!authorizedFor(seat)){
     clearDecisionUI();
     setPanelMsg(`Waiting for ${seatLabel(seat)}'s Singles decision...`);
@@ -990,18 +1047,43 @@ function doSinglesStep(seat){
   if(seat===MY_SEAT){
     setPanelMsg('Singles decision...');
     setPanelBtns([]);
-    showOverlay('Play Singles?', 'All 8 cards are dealt. Go it alone for a shot at +3 game points, or risk -3 if you miss even one trick.', [
-      {label:'Play Singles', cls:'primary', fn:()=>{ hideOverlay(); rd.singles=MY_SEAT; logMsg('You go Singles.'); afterSingles(); }},
-      {label:'No Single', cls:'ghost', fn:()=>{ hideOverlay(); afterSingles(); }}
+    showOverlay('Play Singles?', 'Any player may offer to play this round alone (Singles) — first to accept gets it. Go it alone for a shot at +3 game points, or risk -3 if you miss even one trick.', [
+      {label:'Play Singles', cls:'primary', fn:()=>{
+        hideOverlay(); rd.singles=MY_SEAT; logMsg('You go Singles.');
+        announce('You chose to play Singles!'); afterSinglesDecided();
+      }},
+      {label:'No Single', cls:'ghost', fn:()=>{
+        hideOverlay(); logMsg('You chose No Single.');
+        announce('No Single from you — asking the next player.'); advanceSinglesOffer(seat);
+      }}
     ]);
     return;
   }
   const hand = rd.hands[seat];
   const {score} = handStrength(hand);
-  if(score>16 && Math.random()<0.3){ rd.singles=seat; logMsg(`${seatLabel(seat)} goes Singles!`); }
-  afterSingles();
+  if(score>16 && Math.random()<0.3){
+    rd.singles = seat;
+    logMsg(`${seatLabel(seat)} goes Singles!`);
+    announce(`${seatLabel(seat)} chose to play Singles!`);
+    afterSinglesDecided();
+  } else {
+    announce(`${seatLabel(seat)} chose No Single.`);
+    advanceSinglesOffer(seat);
+  }
 }
-function afterSingles(){
+function advanceSinglesOffer(seat){
+  const rd = G.round;
+  rd.singlesAskedCount = (rd.singlesAskedCount||0) + 1;
+  if(rd.singlesAskedCount>=4){
+    afterSinglesDecided(); // all four declined — normal play this round
+    return;
+  }
+  const next = nextSeat(seat);
+  rd.awaiting = {type:'singlesOffer', seat: next};
+  pushState();
+  doSinglesOfferStep(next);
+}
+function afterSinglesDecided(){
   const rd = G.round;
   if(rd.singles==null){ beginPlay(); return; }
   const opponentSeat = nextSeat(rd.singles);
@@ -1131,10 +1213,12 @@ function presentHumanPlay(legal){
   }
   setPanelBtns([]);
   setPlayable(legal.map(c=>c.id));
-  const trumpKQ = rd.hands[MY_SEAT].filter(c=>c.s===rd.trump && (c.r==='K'||c.r==='Q'));
+  const trumpKQ = rd.trumpRevealed
+    ? rd.hands[MY_SEAT].filter(c=>c.s===rd.trump && (c.r==='K'||c.r==='Q'))
+    : [];
   const myTeam = TEAM[MY_SEAT];
   const btns = [];
-  if(trumpKQ.length===2 && !rd.pairDeclared[myTeam]){
+  if(rd.trumpRevealed && trumpKQ.length===2 && !rd.pairDeclared[myTeam]){
     btns.push({label:'Declare Pair (+4)', cls:'primary', fn:()=>{
       rd.pairDeclared[myTeam]=true;
       logMsg('You declare the pair (King+Queen of trump) — +4 bonus noted.');
@@ -1243,6 +1327,18 @@ function resolveTrick(){
 }
 
 /* ---------------- ROUND END / SCORING ---------------- */
+function applyGamePoints(team, pts){
+  const other = team==='A' ? 'B' : 'A';
+  const current = team==='A' ? G.scoreA : G.scoreB;
+  if(pts<0 && current===0){
+    if(other==='A') G.scoreA += Math.abs(pts); else G.scoreB += Math.abs(pts);
+    const teamNames = team==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
+    const otherNames = other==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
+    logMsg(`${teamNames} were already at 0 — the ${Math.abs(pts)} point(s) go to ${otherNames} instead.`);
+  } else {
+    if(team==='A') G.scoreA = Math.max(0, G.scoreA + pts); else G.scoreB = Math.max(0, G.scoreB + pts);
+  }
+}
 function endRound(){
   const rd = G.round;
   if(!rd.trumpRevealed){
@@ -1267,10 +1363,8 @@ function endRound(){
   let pairNote = '';
   ['A','B'].forEach(t=>{ if(rd.pairDeclared[t]) pairNote += ` Team ${t} banked the pair bonus (+4).`; });
 
-  if(bidTeam==='A') G.scoreA = Math.max(0, G.scoreA + gamePts);
-  else G.scoreB = Math.max(0, G.scoreB + gamePts);
-  if(singlesTeam==='A') G.scoreA = Math.max(0, G.scoreA + singlesGamePts);
-  else if(singlesTeam==='B') G.scoreB = Math.max(0, G.scoreB + singlesGamePts);
+  applyGamePoints(bidTeam, gamePts);
+  if(singlesTeam) applyGamePoints(singlesTeam, singlesGamePts);
 
   if(G.boardMode==='double'){
     if(madeIt) G.boxes[bidTeam].red = true; else G.boxes[bidTeam].black = true;
@@ -1293,8 +1387,10 @@ function renderTrumpSeed(){
   const rd = G && G.round;
   if(!rd || rd.highBidder==null){ el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
-  const targetSeatEl = document.getElementById('seat'+slotOf(rd.highBidder));
+  const slot = slotOf(rd.highBidder);
+  const targetSeatEl = document.getElementById('seat'+slot);
   if(el.parentElement !== targetSeatEl) targetSeatEl.appendChild(el);
+  el.classList.toggle('attach-above', slot==='Bottom');
   if(!rd.trump){ el.innerHTML='<div style="font-size:9px">trump<br>hidden</div>'; el.classList.remove('revealed'); return; }
   if(rd.trumpRevealed){ el.innerHTML = `<div style="font-size:22px">${SUIT_SYM[rd.trump]}</div>`; el.classList.add('revealed'); }
   else { el.innerHTML='<div style="font-size:9px">trump<br>hidden</div>'; el.classList.remove('revealed'); }
@@ -1341,9 +1437,10 @@ function renderTable(){
     'You' + (rd.highBidder===0 && rd.highBid ? ` (${rd.highBid})` : '');
 
   ['Bottom','Left','Top','Right'].forEach(slot=>{
-    document.getElementById('seat'+slot).classList.remove('active','bidder');
+    document.getElementById('seat'+slot).classList.remove('active','bidder','dealer');
   });
   if(rd.highBidder!=null) document.getElementById('seat'+slotOf(rd.highBidder)).classList.add('bidder');
+  if(G.dealer!=null) document.getElementById('seat'+slotOf(G.dealer)).classList.add('dealer');
   if(rd.awaiting && (rd.awaiting.type==='bid' || rd.awaiting.type==='play') && rd.awaiting.seat!=null){
     document.getElementById('seat'+slotOf(rd.awaiting.seat)).classList.add('active');
   }
@@ -1376,7 +1473,7 @@ function renderBoardStrip(){
   });
 }
 function renderLog(){
-  const box = document.getElementById('logBox');
+  const box = document.getElementById('logLines');
   box.innerHTML='';
   if(!G || !G.round || !G.round.log) return;
   for(const line of G.round.log){
@@ -1500,6 +1597,9 @@ document.getElementById('newGameBtn').addEventListener('click', ()=>{
 });
 document.getElementById('logToggle').addEventListener('click', ()=>{
   document.getElementById('logBox').classList.toggle('show');
+});
+document.getElementById('logClose').addEventListener('click', ()=>{
+  document.getElementById('logBox').classList.remove('show');
 });
 
 /* ---------------- BOOT ---------------- */

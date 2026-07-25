@@ -1159,12 +1159,20 @@ function playCard(seat, card, opts){
   rd.playOrder.push(seat);
   const hadLeadSuit = rd.leadSuit;
   if(!rd.leadSuit) rd.leadSuit = card.s;
+  const wasAttempt = !skipTrumpCheck;
   logMsg(`${seatLabel(seat)} plays ${card.r}${SUIT_SYM[card.s]}.`);
-  // Trump discovery: only checked if this was a deliberate trump attempt
-  // (or the card naturally follows the "any card counts" rule for computers/bidder).
-  if(hadLeadSuit && card.s!==hadLeadSuit && !rd.trumpRevealed && card.s===rd.trump && !skipTrumpCheck){
+  // Attempting trump reveals the suit to everyone regardless of whether this
+  // specific card matches it — only whether THIS card wins as trump depends
+  // on the match (handled separately by beats()).
+  if(hadLeadSuit && card.s!==hadLeadSuit && !rd.trumpRevealed && wasAttempt){
     rd.trumpRevealed = true;
-    logMsg(`${seatLabel(seat)}'s card is the trump suit — trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}!`);
+    if(card.s===rd.trump){
+      logMsg(`${seatLabel(seat)} trumps in! Trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}!`);
+      announce(`${seatLabel(seat)} trumps in! Trump is ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}`);
+    } else {
+      logMsg(`${seatLabel(seat)} attempted trump with ${card.r}${SUIT_SYM[card.s]} — not a match, but trump is now revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}.`);
+      announce(`${seatLabel(seat)} attempted trump — revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}`);
+    }
   }
   const playedSeats = Object.keys(rd.current).map(Number);
   const outCount = rd.singles!=null ? 1 : 0;

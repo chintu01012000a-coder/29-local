@@ -529,12 +529,14 @@ document.getElementById('btnJoinCode').addEventListener('click', ()=>{
   document.getElementById('nameScreenTitle').textContent='Your name';
   showScreen('screenName');
 });
-document.getElementById('btnNameContinue').addEventListener('click', ()=>{
+document.getElementById('btnNameContinue').addEventListener('click', (e)=>{
   const val = document.getElementById('nameInput').value.trim();
   if(!val){ alert('Please enter a name.'); return; }
+  e.target.disabled = true;
   pendingName = val;
   if(nameFlowMode==='host'){
     showScreen('screenHostSetup');
+    e.target.disabled = false;
   } else {
     joinRoom(pendingJoinCode, pendingName);
   }
@@ -578,6 +580,8 @@ function joinRoom(code, name){
     if(!doc.exists) throw new Error('No room with that code.');
     const data = doc.data();
     const seats = data.seats.slice();
+    const already = seats.some(s=>s.uid===myUid);
+    if(already) return; // this device already has a seat — do nothing
     const idx = seats.findIndex(s=>s.type==='human' && s.uid===null);
     if(idx===-1) throw new Error('That room is already full.');
     seats[idx] = {type:'human', uid:myUid, name};

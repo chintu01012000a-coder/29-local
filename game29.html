@@ -725,7 +725,7 @@ function hostStartRound(){
     current: {}, leadSuit:null, playOrder:[],
     pointsA:0, pointsB:0,
     pairDeclared:{A:false,B:false},
-    singles:null, doubled:false,
+    singles:null, doubled:false, bidMultiplier:1,
     phase:'bidding',
     awaiting:{type:'bid', seat:first},
     log:[]
@@ -766,6 +766,8 @@ function resumeFlow(){
     case 'dealerForcedBid': doDealerForcedBid(aw.seat); break;
     case 'trump': doTrumpStep(aw.seat); break;
     case 'trumpSecondPick': doSecondOptionStep(aw.seat); break;
+    case 'bidDoubleOffer': doBidDoubleOfferStep(); break;
+    case 'redoubleOffer': doRedoubleOfferStep(); break;
     case 'singlesOffer': doSinglesOfferStep(aw.seat); break;
     case 'double': doDoubleStep(aw.seat); break;
     case 'play': playTurn(aw.seat); break;
@@ -972,12 +974,13 @@ function finishSecondOption(idx){
   const chosen = cards[idx];
   rd.trump = chosen.s;
   rd.trumpRevealed = false;
-  rd.hands[MY_SEAT].push(...cards);
   rd.secondOptionSeat = MY_SEAT;
+  rd.secondOptionCards = cards; // held back — only added to your hand at the same
+                                 // moment everyone else gets their next 4 cards
   rd.pendingSecondOption = null;
   logMsg(`${seatLabel(MY_SEAT)} secretly set trump via the "2nd" option.`);
   document.getElementById('ovTitle').textContent = 'Your Trump Card';
-  document.getElementById('ovText').textContent = `Your trump suit is now ${SUIT_NAME[chosen.s]} — only you know this until it's revealed in play.`;
+  document.getElementById('ovText').textContent = `Your trump suit is now ${SUIT_NAME[chosen.s]} — only you know this until it's revealed in play. Your other 3 cards from this draw will appear once the double/redouble step finishes.`;
   const row = document.getElementById('ovBtns');
   row.innerHTML = '';
   const cardWrap = document.createElement('div');
@@ -988,7 +991,7 @@ function finishSecondOption(idx){
   btn.className = 'btn primary';
   btn.textContent = 'Continue';
   btn.style.marginTop = '6px';
-  btn.addEventListener('click', ()=>{ hideOverlay(); dealRemaining(); });
+  btn.addEventListener('click', ()=>{ hideOverlay(); startBidDoubleOffers(); });
   row.appendChild(btn);
 }
 function setTrump(suit){
@@ -996,13 +999,156 @@ function setTrump(suit){
   rd.trump = suit;
   rd.trumpRevealed = false;
   logMsg(`Trump chosen secretly by ${seatLabel(rd.highBidder)}.`);
-  dealRemaining();
+  startBidDoubleOffers();
+}
+
+/* ---------------- BID DOUBLE / REDOUBLE ----------------
+   Happens right after trump is chosen, before the remaining 4 cards are dealt.
+   BOTH opponents see the Double popup at the same time — whichever accepts
+   first wins it; only if both skip does it stay normal.
+   If doubled, BOTH the bidder and partner see the Redouble popup at the same
+   time — whichever accepts first wins it; if both skip, it stays doubled
+   (does not fall back to normal). Opponents never see the redouble popup. */
+function startBidDoubleOffers(){
+  const rd = G.round;
+  rd.bidMultiplier = 1;
+  rd.bidDoubleSkipped = [];
+  rd.awaiting = {type:'bidDoubleOffer', opponents:[nextSeat(rd.highBidder), prevSeat(rd.highBidder)]};
+  pushState();
+  doBidDoubleOfferStep();
+}
+function doBidDoubleOfferStep(){
+  const rd = G.round;
+  if(!rd.awaiting || rd.awaiting.type!=='bidDoubleOffer') return;
+  const opponents = rd.awaiting.opponents;
+  const skipped = rd.bidDoubleSkipped||[];
+  if(opponents.includes(MY_SEAT) && !skipped.includes(MY_SEAT)){
+    setPanelMsg('Double decision...');
+    setPanelBtns([]);
+    showOverlay('Double the Bid?', `${seatLabel(rd.highBidder)} bid ${rd.highBid}. Either opponent may double — win/loss becomes worth 2 points instead of 1.`, [
+      {label:'Double', cls:'primary', fn:()=>{
+        hideOverlay(); rd.bidMultiplier=2; logMsg(`${seatLabel(MY_SEAT)} doubles the bid!`);
+        announce(`${seatLabel(MY_SEAT)} doubles the bid!`);
+        startRedoubleOffers();
+      }},
+      {label:'Skip', cls:'ghost', fn:()=>{
+        hideOverlay(); logMsg('You skip doubling.');
+        rd.bidDoubleSkipped = rd.bidDoubleSkipped||[]; rd.bidDoubleSkipped.push(MY_SEAT);
+        checkBidDoubleResolution();
+      }}
+    ]);
+    return;
+  }
+  if(IS_HOST){
+    for(const opp of opponents){
+      if(isComputerSeat(opp) && !skipped.includes(opp)){
+        setTimeout(()=>{
+          if(!G || !G.round || G.round.awaiting.type!=='bidDoubleOffer') return;
+          const rd2 = G.round;
+          if((rd2.bidDoubleSkipped||[]).includes(opp)) return;
+          if(Math.random()<0.25){
+            rd2.bidMultiplier=2; logMsg(`${seatLabel(opp)} doubles the bid!`);
+            announce(`${seatLabel(opp)} doubles the bid!`);
+            startRedoubleOffers();
+          } else {
+            rd2.bidDoubleSkipped = rd2.bidDoubleSkipped||[]; rd2.bidDoubleSkipped.push(opp);
+            checkBidDoubleResolution();
+          }
+        }, 600+Math.random()*400);
+        return;
+      }
+    }
+  }
+  if(!opponents.includes(MY_SEAT)){
+    clearDecisionUI();
+    setPanelMsg("Waiting for opponents' Double decision...");
+  }
+}
+function checkBidDoubleResolution(){
+  const rd = G.round;
+  const opponents = rd.awaiting.opponents;
+  const skipped = rd.bidDoubleSkipped||[];
+  if(opponents.every(o=>skipped.includes(o))){
+    dealRemaining(); // both skipped — stays normal
+  } else {
+    pushState();
+    doBidDoubleOfferStep();
+  }
+}
+function startRedoubleOffers(){
+  const rd = G.round;
+  rd.redoubleSkipped = [];
+  rd.awaiting = {type:'redoubleOffer', biddingSide:[rd.highBidder, PARTNER[rd.highBidder]]};
+  pushState();
+  doRedoubleOfferStep();
+}
+function doRedoubleOfferStep(){
+  const rd = G.round;
+  if(!rd.awaiting || rd.awaiting.type!=='redoubleOffer') return;
+  const side = rd.awaiting.biddingSide;
+  const skipped = rd.redoubleSkipped||[];
+  if(side.includes(MY_SEAT) && !skipped.includes(MY_SEAT)){
+    setPanelMsg('Redouble decision...');
+    setPanelBtns([]);
+    showOverlay('Redouble?', 'The bid has been doubled. Either you or your partner may redouble — win/loss becomes worth 4 points instead of 2. Singles will not be offered this round if redoubled.', [
+      {label:'Redouble', cls:'primary', fn:()=>{
+        hideOverlay(); rd.bidMultiplier=4; logMsg(`${seatLabel(MY_SEAT)} redoubles!`);
+        announce(`${seatLabel(MY_SEAT)} redoubles! Bid now worth 4 points.`);
+        dealRemaining();
+      }},
+      {label:'Skip', cls:'ghost', fn:()=>{
+        hideOverlay(); logMsg('You skip redoubling.');
+        rd.redoubleSkipped = rd.redoubleSkipped||[]; rd.redoubleSkipped.push(MY_SEAT);
+        checkRedoubleResolution();
+      }}
+    ]);
+    return;
+  }
+  if(IS_HOST){
+    for(const s of side){
+      if(isComputerSeat(s) && !skipped.includes(s)){
+        setTimeout(()=>{
+          if(!G || !G.round || G.round.awaiting.type!=='redoubleOffer') return;
+          const rd2 = G.round;
+          if((rd2.redoubleSkipped||[]).includes(s)) return;
+          if(Math.random()<0.2){
+            rd2.bidMultiplier=4; logMsg(`${seatLabel(s)} redoubles!`);
+            announce(`${seatLabel(s)} redoubles! Bid now worth 4 points.`);
+            dealRemaining();
+          } else {
+            rd2.redoubleSkipped = rd2.redoubleSkipped||[]; rd2.redoubleSkipped.push(s);
+            checkRedoubleResolution();
+          }
+        }, 600+Math.random()*400);
+        return;
+      }
+    }
+  }
+  if(!side.includes(MY_SEAT)){
+    clearDecisionUI();
+    setPanelMsg("Waiting for your team's Redouble decision...");
+  }
+}
+function checkRedoubleResolution(){
+  const rd = G.round;
+  const side = rd.awaiting.biddingSide;
+  const skipped = rd.redoubleSkipped||[];
+  if(side.every(s=>skipped.includes(s))){
+    dealRemaining(); // both skipped — stays doubled (bidMultiplier remains 2)
+  } else {
+    pushState();
+    doRedoubleOfferStep();
+  }
 }
 
 function dealRemaining(){
   const rd = G.round;
   for(const seat of rd.order4){
-    if(seat===rd.secondOptionSeat) continue; // already received their next 4 via the "2nd" option
+    if(seat===rd.secondOptionSeat){
+      rd.hands[seat].push(...rd.secondOptionCards);
+      rd.secondOptionCards = null;
+      continue;
+    }
     rd.hands[seat].push(...rd.deck.splice(0,4));
   }
 
@@ -1027,6 +1173,11 @@ function dealRemaining(){
     return;
   }
 
+  if(rd.bidMultiplier===4){
+    logMsg('The bid was redoubled — Singles is not offered this round.');
+    beginPlay();
+    return;
+  }
   rd.awaiting = {type:'singlesOffer', seat: rd.first};
   rd.singlesAskedCount = 0;
   pushState();
@@ -1350,7 +1501,7 @@ function endRound(){
   const bidTeam = TEAM[rd.highBidder];
   const bidTeamPts = bidTeam==='A' ? rd.pointsA : rd.pointsB;
   const madeIt = bidTeamPts >= rd.highBid;
-  let gamePts = madeIt ? 1 : -1;
+  let gamePts = (madeIt ? 1 : -1) * (rd.bidMultiplier||1);
 
   let singlesNote = '', singlesGamePts = 0, singlesTeam = null;
   if(rd.singles!=null){
@@ -1374,7 +1525,8 @@ function endRound(){
   if(G.scoreA>0 && G.scoreA%6===0) milestoneNote += ` 🎉 ${seatLabel(0)} & ${seatLabel(2)} have reached ${G.scoreA} points!`;
   if(G.scoreB>0 && G.scoreB%6===0) milestoneNote += ` 🎉 ${seatLabel(1)} & ${seatLabel(3)} have reached ${G.scoreB} points!`;
 
-  const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}.${pairNote}${singlesNote}${milestoneNote}`;
+  const multNote = rd.bidMultiplier===4 ? ' (Redoubled — ×4!)' : rd.bidMultiplier===2 ? ' (Doubled — ×2)' : '';
+  const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}${multNote}.${pairNote}${singlesNote}${milestoneNote}`;
   logMsg('Round over. '+overText);
 
   rd.awaiting = {type:'roundEndAck', overText};

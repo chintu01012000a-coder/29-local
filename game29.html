@@ -229,7 +229,7 @@ body{
 }
 .log.show{display:block;}
 .overlay{
-  position:absolute; inset:0; background:rgba(0,0,0,0.55); z-index:50;
+  position:absolute; top:0; left:0; right:0; bottom:250px; background:rgba(0,0,0,0.55); z-index:50;
   display:flex; align-items:center; justify-content:center;
 }
 .overlay .card2{
@@ -297,7 +297,7 @@ body{
       <div class="pod"><div class="lbl" id="teamBlabel">Team B</div><div class="val" id="scoreB">0</div></div>
     </div>
     <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end;">
-      <button class="menubtn" id="newGameBtn">Play Again</button>
+      <button class="menubtn" id="newGameBtn">Cancel Round</button>
       <button class="menubtn" id="logToggle">Log</button>
     </div>
   </div>
@@ -935,7 +935,8 @@ function finishSecondOption(idx){
   rd.secondOptionSeat = MY_SEAT;
   rd.pendingSecondOption = null;
   logMsg(`${seatLabel(MY_SEAT)} secretly set trump via the "2nd" option.`);
-  dealRemaining();
+  showOverlay('Your Trump Suit', `Your trump suit is ${SUIT_SYM[chosen.s]} ${SUIT_NAME[chosen.s]} — only you know this until it's revealed in play.`,
+    [{label:'Got it', cls:'primary', fn:()=>{ hideOverlay(); dealRemaining(); }}]);
 }
 function setTrump(suit){
   const rd = G.round;
@@ -991,7 +992,7 @@ function doSinglesStep(seat){
     setPanelBtns([]);
     showOverlay('Play Singles?', 'All 8 cards are dealt. Go it alone for a shot at +3 game points, or risk -3 if you miss even one trick.', [
       {label:'Play Singles', cls:'primary', fn:()=>{ hideOverlay(); rd.singles=MY_SEAT; logMsg('You go Singles.'); afterSingles(); }},
-      {label:'Play Normally', cls:'ghost', fn:()=>{ hideOverlay(); afterSingles(); }}
+      {label:'No Single', cls:'ghost', fn:()=>{ hideOverlay(); afterSingles(); }}
     ]);
     return;
   }
@@ -1037,13 +1038,33 @@ function beginPlay(){
   pushState();
   playTurn(rd.leader);
 }
+function currentBestTrumpRank(rd){
+  if(!rd.trumpRevealed) return null;
+  let best = null;
+  for(const s of Object.keys(rd.current)){
+    const c = rd.current[s];
+    if(c.s===rd.trump){
+      const r = rankIdx(c.r);
+      if(best===null || r>best) best = r;
+    }
+  }
+  return best;
+}
 function legalCards(seat){
   const rd = G.round;
   const hand = rd.hands[seat];
   const ledSuit = rd.leadSuit;
   if(!ledSuit) return hand.slice();
   const followers = hand.filter(c=>c.s===ledSuit);
-  return followers.length>0 ? followers : hand.slice();
+  if(followers.length>0) return followers;
+  const bestTrumpRank = currentBestTrumpRank(rd);
+  if(bestTrumpRank!=null){
+    // someone already trumped in this trick — small trump cards can't be
+    // played under it; only a bigger trump or a non-trump discard is legal
+    const overOrSafe = hand.filter(c=> c.s!==rd.trump || rankIdx(c.r)>bestTrumpRank);
+    if(overOrSafe.length>0) return overOrSafe;
+  }
+  return hand.slice();
 }
 function seatOutOfPlay(seat){
   const rd = G.round;
@@ -1255,16 +1276,13 @@ function endRound(){
     if(madeIt) G.boxes[bidTeam].red = true; else G.boxes[bidTeam].black = true;
   }
 
-  const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}.${pairNote}${singlesNote}`;
+  let milestoneNote = '';
+  if(G.scoreA>0 && G.scoreA%6===0) milestoneNote += ` 🎉 ${seatLabel(0)} & ${seatLabel(2)} have reached ${G.scoreA} points!`;
+  if(G.scoreB>0 && G.scoreB%6===0) milestoneNote += ` 🎉 ${seatLabel(1)} & ${seatLabel(3)} have reached ${G.scoreB} points!`;
+
+  const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}.${pairNote}${singlesNote}${milestoneNote}`;
   logMsg('Round over. '+overText);
 
-  if(G.scoreA>=6 || G.scoreB>=6){
-    G.matchOver = true;
-    const winnerTeam = G.scoreA>=6 ? 'A':'B';
-    rd.awaiting = {type:'matchEndAck', winnerTeam};
-    pushState();
-    return;
-  }
   rd.awaiting = {type:'roundEndAck', overText};
   pushState();
 }
@@ -1316,9 +1334,11 @@ function renderTable(){
     wrap.innerHTML='';
     const n = rd.hands[seat] ? rd.hands[seat].length : 0;
     for(let i=0;i<n;i++){ const b=document.createElement('div'); b.className='cardback'; wrap.appendChild(b); }
-    document.getElementById('seat'+slot).querySelector('.name').textContent = seatLabel(seat);
+    document.getElementById('seat'+slot).querySelector('.name').textContent =
+      seatLabel(seat) + (rd.highBidder===seat && rd.highBid ? ` (${rd.highBid})` : '');
   });
-  document.getElementById('seatBottom').querySelector('.name').textContent = 'You';
+  document.getElementById('seatBottom').querySelector('.name').textContent =
+    'You' + (rd.highBidder===0 && rd.highBid ? ` (${rd.highBid})` : '');
 
   ['Bottom','Left','Top','Right'].forEach(slot=>{
     document.getElementById('seat'+slot).classList.remove('active','bidder');
@@ -1390,10 +1410,11 @@ function showRedealOverlay(){
     }}], true));
 }
 function showRoundEndOverlay(){
-  showOverlay('Round Result', G.round.awaiting.overText,
-    overlayBtnList([{label:'Next Round', cls:'primary', fn:()=>{
-      hideOverlay(); G.dealer = nextSeat(G.dealer); hostStartRound();
-    }}], true));
+  const btns = overlayBtnList([{label:'Next Round', cls:'primary', fn:()=>{
+    hideOverlay(); G.dealer = nextSeat(G.dealer); hostStartRound();
+  }}], true);
+  btns.push({label:'View Log', cls:'ghost', fn:()=>{ document.getElementById('logBox').classList.add('show'); }});
+  showOverlay('Round Result', G.round.awaiting.overText, btns);
 }
 function showMatchEndOverlay(){
   const winnerTeam = G.round.awaiting.winnerTeam;
@@ -1404,6 +1425,10 @@ function showMatchEndOverlay(){
 }
 function replayMatch(){
   G = { dealer:0, scoreA:0, scoreB:0, boardMode:G.boardMode, boxes:{A:{red:false,black:false},B:{red:false,black:false}}, matchOver:false };
+  hostStartRound();
+}
+function cancelRound(){
+  logMsg('Round cancelled by host — re-dealing with the same dealer.');
   hostStartRound();
 }
 
@@ -1471,7 +1496,7 @@ function hideOverlay(){ document.getElementById('overlay').classList.add('hidden
 
 document.getElementById('newGameBtn').addEventListener('click', ()=>{
   if(!IS_HOST) return;
-  if(confirm('Start a new match with the same players?')) replayMatch();
+  if(confirm('Cancel this round and re-deal? Scores stay the same.')) cancelRound();
 });
 document.getElementById('logToggle').addEventListener('click', ()=>{
   document.getElementById('logBox').classList.toggle('show');

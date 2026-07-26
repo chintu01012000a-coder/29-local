@@ -132,7 +132,7 @@ body{
 .seat .name{
   font-weight:600; padding:2px 9px; border-radius:20px;
   background:rgba(0,0,0,0.25); border:1px solid var(--line);
-  max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .seat.active .name{ border-color:var(--gold); color:var(--gold-soft); box-shadow:0 0 10px rgba(201,162,39,0.35);}
 .seat.bidder .name::after{content:" ★"; color:var(--gold-soft);}
@@ -241,8 +241,8 @@ body{
   background:none; border:1px solid var(--gold); color:var(--cream); border-radius:8px;
   width:36px; height:36px; font-size:16px; line-height:1; cursor:pointer;
 }
-#logLines{ padding:14px 16px 40px; }
-#logLines > div{ padding:7px 0; border-bottom:1px solid var(--line); }
+#logLines, #historyLines{ padding:14px 16px 40px; }
+#logLines > div, #historyLines > div{ padding:7px 0; border-bottom:1px solid var(--line); }
 .overlay{
   position:absolute; top:0; left:0; right:0; bottom:235px; background:rgba(0,0,0,0.55); z-index:50;
   display:flex; align-items:center; justify-content:center;
@@ -315,6 +315,7 @@ body{
     <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end;">
       <button class="menubtn" id="newGameBtn">Cancel Round</button>
       <button class="menubtn" id="logToggle">Log</button>
+      <button class="menubtn" id="historyToggle">History</button>
     </div>
   </div>
 
@@ -363,6 +364,14 @@ body{
       <button class="logClose" id="logClose">✕</button>
     </div>
     <div id="logLines"></div>
+  </div>
+
+  <div class="log" id="historyBox">
+    <div class="logHeader">
+      <span>Round History</span>
+      <button class="logClose" id="historyClose">✕</button>
+    </div>
+    <div id="historyLines"></div>
   </div>
 
   <div class="panel">
@@ -449,6 +458,7 @@ let PLAYABLE_IDS = [];
 
 /* ---------------- SEAT / IDENTITY HELPERS ---------------- */
 function isComputerSeat(seat){ return ROOM && ROOM.seats[seat] && ROOM.seats[seat].type==='cpu'; }
+function humanSeatsList(){ return [0,1,2,3].filter(s=>!isComputerSeat(s)); }
 function seatLabel(seat){
   if(seat===MY_SEAT) return 'You';
   if(!ROOM || !ROOM.seats[seat]) return '...';
@@ -563,7 +573,7 @@ function createRoom(hostName, numComputers){
   document.querySelectorAll('#screenHostSetup [data-cpu]').forEach(b=>b.disabled=true);
   db.collection(ROOMS).doc(code).set({
     hostUid: myUid, numComputers, humansNeeded, status, seats,
-    boardMode:null, createdAt: Date.now()
+    boardMode:null, trumpMode:'hidden', createdAt: Date.now()
   }).then(()=>{
     ROOM_CODE = code;
     subscribeRoom(code);
@@ -674,6 +684,18 @@ function renderLobbyScreen(){
     });
     boardWrap.appendChild(row);
 
+    const th = document.createElement('h2'); th.style.marginTop='14px'; th.textContent='Trump style';
+    boardWrap.appendChild(th);
+    const trow = document.createElement('div'); trow.className='rowbtns';
+    ['hidden','show'].forEach(mode=>{
+      const b = document.createElement('button');
+      b.className = 'btn small ' + ((ROOM.trumpMode||'hidden')===mode?'primary':'ghost');
+      b.textContent = mode==='hidden' ? 'Hidden Trump' : 'Show Trump';
+      b.addEventListener('click', ()=> db.collection(ROOMS).doc(ROOM_CODE).update({trumpMode:mode}));
+      trow.appendChild(b);
+    });
+    boardWrap.appendChild(trow);
+
     const startBtn = document.createElement('button');
     startBtn.className='btn primary'; startBtn.style.marginTop='12px'; startBtn.textContent='Start Game';
     startBtn.disabled = !(allFilled && ROOM.boardMode);
@@ -704,8 +726,10 @@ function startGame(){
       dealer: 0,
       scoreA: 0, scoreB: 0,
       boardMode: ROOM.boardMode,
+      trumpMode: ROOM.trumpMode||'hidden',
       boxes: {A:{red:false, black:false}, B:{red:false, black:false}},
       matchOver:false,
+      roundHistory: [],
     };
     hostStartRound();
   });
@@ -731,6 +755,7 @@ function hostStartRound(){
     pointsA:0, pointsB:0,
     pairDeclared:{A:false,B:false},
     singles:null, doubled:false, bidMultiplier:1, partnerRevealShown:false, originalTrump:null,
+    bidDoubleBy:null, redoubleBy:null,
     phase:'bidding',
     awaiting:{type:'bid', seat:first},
     log:[]
@@ -773,7 +798,7 @@ function resumeFlow(){
     case 'trumpSecondPick': doSecondOptionStep(aw.seat); break;
     case 'bidDoubleOffer': doBidDoubleOfferStep(); break;
     case 'redoubleOffer': doRedoubleOfferStep(); break;
-    case 'singlesOffer': doSinglesOfferStep(aw.seat); break;
+    case 'singlesOffer': doSinglesOfferStep(); break;
     case 'double': doDoubleStep(aw.seat); break;
     case 'play': playTurn(aw.seat); break;
     case 'redealAck': showRedealOverlay(); break;
@@ -978,7 +1003,8 @@ function finishSecondOption(idx){
   const cards = rd.pendingSecondOption;
   const chosen = cards[idx];
   rd.trump = chosen.s;
-  rd.trumpRevealed = false;
+  rd.trumpRevealed = (G.trumpMode==='show');
+  if(rd.trumpRevealed) announce(`Trump is ${SUIT_SYM[chosen.s]} ${SUIT_NAME[chosen.s]}!`);
   rd.secondOptionSeat = MY_SEAT;
   rd.secondOptionCards = cards; // held back — only added to your hand at the same
                                  // moment everyone else gets their next 4 cards
@@ -1002,8 +1028,13 @@ function finishSecondOption(idx){
 function setTrump(suit){
   const rd = G.round;
   rd.trump = suit;
-  rd.trumpRevealed = false;
-  logMsg(`Trump chosen secretly by ${seatLabel(rd.highBidder)}.`);
+  rd.trumpRevealed = (G.trumpMode==='show');
+  if(rd.trumpRevealed){
+    logMsg(`Trump chosen by ${seatLabel(rd.highBidder)}: ${SUIT_SYM[suit]} ${SUIT_NAME[suit]} (Show Trump — revealed to everyone).`);
+    announce(`Trump is ${SUIT_SYM[suit]} ${SUIT_NAME[suit]}!`);
+  } else {
+    logMsg(`Trump chosen secretly by ${seatLabel(rd.highBidder)}.`);
+  }
   startBidDoubleOffers();
 }
 
@@ -1032,7 +1063,7 @@ function doBidDoubleOfferStep(){
     setPanelBtns([]);
     showOverlay('Double the Bid?', `${seatLabel(rd.highBidder)} bid ${rd.highBid}. Either opponent may double — win/loss becomes worth 2 points instead of 1.`, [
       {label:'Double', cls:'primary', fn:()=>{
-        hideOverlay(); rd.bidMultiplier=2; logMsg(`${seatLabel(MY_SEAT)} doubles the bid!`);
+        hideOverlay(); rd.bidMultiplier=2; rd.bidDoubleBy=MY_SEAT; logMsg(`${seatLabel(MY_SEAT)} doubles the bid!`);
         announce(`${seatLabel(MY_SEAT)} doubles the bid!`);
         startRedoubleOffers();
       }},
@@ -1052,7 +1083,7 @@ function doBidDoubleOfferStep(){
           const rd2 = G.round;
           if((rd2.bidDoubleSkipped||[]).includes(opp)) return;
           if(Math.random()<0.25){
-            rd2.bidMultiplier=2; logMsg(`${seatLabel(opp)} doubles the bid!`);
+            rd2.bidMultiplier=2; rd2.bidDoubleBy=opp; logMsg(`${seatLabel(opp)} doubles the bid!`);
             announce(`${seatLabel(opp)} doubles the bid!`);
             startRedoubleOffers();
           } else {
@@ -1097,7 +1128,7 @@ function doRedoubleOfferStep(){
     setPanelBtns([]);
     showOverlay('Redouble?', 'The bid has been doubled. Either you or your partner may redouble — win/loss becomes worth 4 points instead of 2. Singles will not be offered this round if redoubled.', [
       {label:'Redouble', cls:'primary', fn:()=>{
-        hideOverlay(); rd.bidMultiplier=4; logMsg(`${seatLabel(MY_SEAT)} redoubles!`);
+        hideOverlay(); rd.bidMultiplier=4; rd.redoubleBy=MY_SEAT; logMsg(`${seatLabel(MY_SEAT)} redoubles!`);
         announce(`${seatLabel(MY_SEAT)} redoubles! Bid now worth 4 points.`);
         dealRemaining();
       }},
@@ -1117,7 +1148,7 @@ function doRedoubleOfferStep(){
           const rd2 = G.round;
           if((rd2.redoubleSkipped||[]).includes(s)) return;
           if(Math.random()<0.2){
-            rd2.bidMultiplier=4; logMsg(`${seatLabel(s)} redoubles!`);
+            rd2.bidMultiplier=4; rd2.redoubleBy=s; logMsg(`${seatLabel(s)} redoubles!`);
             announce(`${seatLabel(s)} redoubles! Bid now worth 4 points.`);
             dealRemaining();
           } else {
@@ -1183,24 +1214,21 @@ function dealRemaining(){
     beginPlay();
     return;
   }
-  rd.awaiting = {type:'singlesOffer', seat: rd.first};
-  rd.singlesAskedCount = 0;
+  rd.singlesSkipped = [];
+  rd.awaiting = {type:'singlesOffer'};
   pushState();
-  doSinglesOfferStep(rd.first);
+  doSinglesOfferStep();
 }
 
 /* ---------------- SINGLES / DOUBLE ---------------- */
 // Singles is NOT restricted to the bidder — any of the four players may offer
-// to play it. Players are asked in turn order; whoever says yes FIRST gets it,
-// and nobody else is asked once someone has taken it.
-function doSinglesOfferStep(seat){
-  if(!authorizedFor(seat)){
-    clearDecisionUI();
-    setPanelMsg(`Waiting for ${seatLabel(seat)}'s Singles decision...`);
-    return;
-  }
+// to play it. ALL FOUR see the popup at the same time; whoever accepts FIRST
+// gets it, and it's cancelled only once all four have declined.
+function doSinglesOfferStep(){
   const rd = G.round;
-  if(seat===MY_SEAT){
+  if(!rd.awaiting || rd.awaiting.type!=='singlesOffer') return;
+  const skipped = rd.singlesSkipped||[];
+  if(!skipped.includes(MY_SEAT)){
     setPanelMsg('Singles decision...');
     setPanelBtns([]);
     showOverlay('Play Singles?', 'Any player may offer to play this round alone (Singles) — first to accept gets it. Go it alone for a shot at +3 game points, or risk -3 if you miss even one trick.', [
@@ -1210,34 +1238,48 @@ function doSinglesOfferStep(seat){
       }},
       {label:'No Single', cls:'ghost', fn:()=>{
         hideOverlay(); logMsg('You chose No Single.');
-        announce('No Single from you — asking the next player.'); advanceSinglesOffer(seat);
+        rd.singlesSkipped = rd.singlesSkipped||[]; rd.singlesSkipped.push(MY_SEAT);
+        checkSinglesResolution();
       }}
     ]);
     return;
   }
-  const hand = rd.hands[seat];
-  const {score} = handStrength(hand);
-  if(score>16 && Math.random()<0.3){
-    rd.singles = seat;
-    logMsg(`${seatLabel(seat)} goes Singles!`);
-    announce(`${seatLabel(seat)} chose to play Singles!`);
-    afterSinglesDecided();
-  } else {
-    announce(`${seatLabel(seat)} chose No Single.`);
-    advanceSinglesOffer(seat);
+  if(IS_HOST){
+    for(const s of [0,1,2,3]){
+      if(isComputerSeat(s) && !skipped.includes(s)){
+        setTimeout(()=>{
+          if(!G || !G.round || G.round.awaiting.type!=='singlesOffer') return;
+          const rd2 = G.round;
+          if((rd2.singlesSkipped||[]).includes(s)) return;
+          const {score} = handStrength(rd2.hands[s]);
+          if(score>16 && Math.random()<0.3){
+            rd2.singles = s;
+            logMsg(`${seatLabel(s)} goes Singles!`);
+            announce(`${seatLabel(s)} chose to play Singles!`);
+            afterSinglesDecided();
+          } else {
+            rd2.singlesSkipped = rd2.singlesSkipped||[]; rd2.singlesSkipped.push(s);
+            announce(`${seatLabel(s)} chose No Single.`);
+            checkSinglesResolution();
+          }
+        }, 600+Math.random()*400);
+        return;
+      }
+    }
+  }
+  if(skipped.includes(MY_SEAT)){
+    clearDecisionUI();
+    setPanelMsg("Waiting for the others' Singles decision...");
   }
 }
-function advanceSinglesOffer(seat){
+function checkSinglesResolution(){
   const rd = G.round;
-  rd.singlesAskedCount = (rd.singlesAskedCount||0) + 1;
-  if(rd.singlesAskedCount>=4){
+  if((rd.singlesSkipped||[]).length>=4){
     afterSinglesDecided(); // all four declined — normal play this round
-    return;
+  } else {
+    pushState();
+    doSinglesOfferStep();
   }
-  const next = nextSeat(seat);
-  rd.awaiting = {type:'singlesOffer', seat: next};
-  pushState();
-  doSinglesOfferStep(next);
 }
 function afterSinglesDecided(){
   const rd = G.round;
@@ -1601,6 +1643,21 @@ function endRound(){
   const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}${multNote}.${pairNote}${singlesNote}${sweepNote}${milestoneNote}`;
   logMsg('Round over. '+overText);
 
+  G.roundHistory = G.roundHistory || [];
+  G.roundHistory.push({
+    n: G.roundHistory.length+1,
+    bidder: seatLabel(rd.highBidder),
+    bidTeam,
+    bid: rd.highBid,
+    took: bidTeamPts,
+    madeIt,
+    mult: rd.bidMultiplier||1,
+    singlesPlayer: rd.singles!=null ? seatLabel(rd.singles) : null,
+    sweepTeam,
+    scoreA: G.scoreA,
+    scoreB: G.scoreB,
+  });
+
   rd.awaiting = {type:'roundEndAck', overText};
   pushState();
 }
@@ -1645,6 +1702,14 @@ function renderHand(){
     row.appendChild(el);
   }
 }
+function seatStatusSuffix(seat, rd){
+  let s = '';
+  if(rd.highBidder===seat && rd.highBid) s += ` (${rd.highBid})`;
+  if(rd.bidDoubleBy===seat) s += ' 🔷×2';
+  if(rd.redoubleBy===seat) s += ' 🔶×4';
+  if(rd.singles===seat) s += ' 🃏S';
+  return s;
+}
 function renderTable(){
   if(!G || !G.round || MY_SEAT==null) return;
   const rd = G.round;
@@ -1655,10 +1720,10 @@ function renderTable(){
     const n = rd.hands[seat] ? rd.hands[seat].length : 0;
     for(let i=0;i<n;i++){ const b=document.createElement('div'); b.className='cardback'; wrap.appendChild(b); }
     document.getElementById('seat'+slot).querySelector('.name').textContent =
-      seatLabel(seat) + (rd.highBidder===seat && rd.highBid ? ` (${rd.highBid})` : '');
+      seatLabel(seat) + seatStatusSuffix(seat, rd);
   });
   document.getElementById('seatBottom').querySelector('.name').textContent =
-    'You' + (rd.highBidder===0 && rd.highBid ? ` (${rd.highBid})` : '');
+    'You' + seatStatusSuffix(0, rd);
 
   ['Bottom','Left','Top','Right'].forEach(slot=>{
     document.getElementById('seat'+slot).classList.remove('active','bidder','dealer');
@@ -1723,14 +1788,43 @@ function renderLog(){
     const d = document.createElement('div'); d.textContent=line; box.appendChild(d);
   }
 }
+function renderHistory(){
+  const box = document.getElementById('historyLines');
+  box.innerHTML='';
+  if(!G || !G.roundHistory || G.roundHistory.length===0){
+    const d = document.createElement('div');
+    d.textContent = 'No rounds completed yet.';
+    box.appendChild(d);
+    return;
+  }
+  for(const r of G.roundHistory.slice().reverse()){
+    const d = document.createElement('div');
+    const bidTeamNames = r.bidTeam==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
+    const multTxt = r.mult===4 ? ' (×4 redoubled)' : r.mult===2 ? ' (×2 doubled)' : '';
+    let scoreTxt;
+    if(G.boardMode==='single'){
+      const diff = r.scoreA - r.scoreB;
+      scoreTxt = diff===0 ? '0' : diff>0 ? `${seatLabel(0)} & ${seatLabel(2)} ❤️ ${diff}` : `${seatLabel(1)} & ${seatLabel(3)} ❤️ ${-diff}`;
+    } else {
+      scoreTxt = `A: ${r.scoreA} — B: ${r.scoreB}`;
+    }
+    d.innerHTML = `<b>Round ${r.n}:</b> ${r.bidder} (${bidTeamNames}) bid ${r.bid}, took ${r.took}${multTxt} — ${r.madeIt?'made':'failed'}`
+      + (r.singlesPlayer ? `<br>Singles: ${r.singlesPlayer}` : '')
+      + (r.sweepTeam ? `<br>🎉 Sweep by ${r.sweepTeam==='A'?seatLabel(0)+' & '+seatLabel(2):seatLabel(1)+' & '+seatLabel(3)}` : '')
+      + `<br>Score after: ${scoreTxt}`;
+    box.appendChild(d);
+  }
+}
 function renderAll(){
   renderScore();
   renderBoardStrip();
   renderTable();
   renderHand();
   renderLog();
+  renderHistory();
   checkToast();
   checkPartnerReveal();
+  checkCancelVotes();
 }
 let partnerRevealShownLocally = false;
 function checkPartnerReveal(){
@@ -1781,11 +1875,27 @@ function showRedealOverlay(){
     }}], true));
 }
 function showRoundEndOverlay(){
-  const btns = overlayBtnList([{label:'Next Round', cls:'primary', fn:()=>{
-    hideOverlay(); G.dealer = nextSeat(G.dealer); hostStartRound();
-  }}], true);
+  const rd = G.round;
+  rd.readyNext = rd.readyNext || [];
+  if(IS_HOST && humanSeatsList().every(s=>rd.readyNext.includes(s))){
+    G.dealer = nextSeat(G.dealer);
+    hostStartRound();
+    return;
+  }
+  const myReady = rd.readyNext.includes(MY_SEAT);
+  const readyNames = rd.readyNext.map(s=>seatLabel(s)).join(', ') || 'nobody yet';
+  const btns = [];
+  if(!myReady){
+    btns.push({label:'Next Round', cls:'primary', fn:()=>{
+      rd.readyNext.push(MY_SEAT);
+      logMsg(`${seatLabel(MY_SEAT)} is ready for the next round.`);
+      pushState();
+      showRoundEndOverlay();
+    }});
+  }
   btns.push({label:'View Log', cls:'ghost', fn:()=>{ document.getElementById('logBox').classList.add('show'); }});
-  showOverlay('Round Result', G.round.awaiting.overText, btns);
+  const readyText = myReady ? `\n\nWaiting on everyone else... (ready: ${readyNames})` : `\n\nReady so far: ${readyNames}`;
+  showOverlay('Round Result', G.round.awaiting.overText+readyText, btns);
 }
 function showMatchEndOverlay(){
   const winnerTeam = G.round.awaiting.winnerTeam;
@@ -1795,7 +1905,7 @@ function showMatchEndOverlay(){
     overlayBtnList([{label:'Play Again', cls:'primary', fn:()=>{ hideOverlay(); replayMatch(); }}], true));
 }
 function replayMatch(){
-  G = { dealer:0, scoreA:0, scoreB:0, boardMode:G.boardMode, boxes:{A:{red:false,black:false},B:{red:false,black:false}}, matchOver:false };
+  G = { dealer:0, scoreA:0, scoreB:0, boardMode:G.boardMode, trumpMode:G.trumpMode, boxes:{A:{red:false,black:false},B:{red:false,black:false}}, matchOver:false, roundHistory:[] };
   hostStartRound();
 }
 function cancelRound(){
@@ -1866,14 +1976,35 @@ function showOverlay(title, text, btns){
 function hideOverlay(){ document.getElementById('overlay').classList.add('hidden'); }
 
 document.getElementById('newGameBtn').addEventListener('click', ()=>{
-  if(!IS_HOST) return;
-  if(confirm('Cancel this round and re-deal? Scores stay the same.')) cancelRound();
+  if(!G || !G.round) return;
+  const rd = G.round;
+  rd.cancelVotes = rd.cancelVotes || [];
+  if(rd.cancelVotes.includes(MY_SEAT)){ alert('You already voted to cancel — waiting on the others.'); return; }
+  if(!confirm('Vote to cancel this round? It only cancels once everyone agrees.')) return;
+  rd.cancelVotes.push(MY_SEAT);
+  logMsg(`${seatLabel(MY_SEAT)} voted to cancel the round.`);
+  announce(`${seatLabel(MY_SEAT)} voted to cancel (${rd.cancelVotes.length}/${humanSeatsList().length})`);
+  pushState();
+  checkCancelVotes();
 });
+function checkCancelVotes(){
+  if(!G || !G.round) return;
+  const rd = G.round;
+  if(IS_HOST && humanSeatsList().every(s=>(rd.cancelVotes||[]).includes(s))){
+    cancelRound();
+  }
+}
 document.getElementById('logToggle').addEventListener('click', ()=>{
   document.getElementById('logBox').classList.toggle('show');
 });
 document.getElementById('logClose').addEventListener('click', ()=>{
   document.getElementById('logBox').classList.remove('show');
+});
+document.getElementById('historyToggle').addEventListener('click', ()=>{
+  document.getElementById('historyBox').classList.toggle('show');
+});
+document.getElementById('historyClose').addEventListener('click', ()=>{
+  document.getElementById('historyBox').classList.remove('show');
 });
 
 /* ---------------- BOOT ---------------- */

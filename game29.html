@@ -308,8 +308,9 @@ body{
   <div class="topbar">
     <div class="brand">29 <span>Trump &amp; Trick</span></div>
     <div class="scorepods">
-      <div class="pod"><div class="lbl" id="teamAlabel">Team A</div><div class="val" id="scoreA">0</div></div>
-      <div class="pod"><div class="lbl" id="teamBlabel">Team B</div><div class="val" id="scoreB">0</div></div>
+      <div class="pod" id="podA"><div class="lbl" id="teamAlabel">Team A</div><div class="val" id="scoreA">0</div></div>
+      <div class="pod" id="podB"><div class="lbl" id="teamBlabel">Team B</div><div class="val" id="scoreB">0</div></div>
+      <div class="pod hidden" id="podUnified"><div class="lbl" id="unifiedLabel">Score</div><div class="val" id="unifiedScore">0</div></div>
     </div>
     <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end;">
       <button class="menubtn" id="newGameBtn">Cancel Round</button>
@@ -729,7 +730,7 @@ function hostStartRound(){
     current: {}, leadSuit:null, playOrder:[],
     pointsA:0, pointsB:0,
     pairDeclared:{A:false,B:false},
-    singles:null, doubled:false, bidMultiplier:1,
+    singles:null, doubled:false, bidMultiplier:1, partnerRevealShown:false, originalTrump:null,
     phase:'bidding',
     awaiting:{type:'bid', seat:first},
     log:[]
@@ -1270,7 +1271,16 @@ function doDoubleStep(seat){
 function beginPlay(){
   const rd = G.round;
   rd.phase='play';
-  rd.leader = rd.first;
+  if(rd.singles!=null){
+    // Singles has its own trump rule: whatever suit gets led in the very first
+    // trick becomes THIS round's trump, replacing the bid's original trump.
+    rd.leader = rd.singles;
+    rd.originalTrump = rd.trump;
+    rd.trump = null;
+    rd.trumpRevealed = false;
+  } else {
+    rd.leader = rd.first;
+  }
   rd.awaiting = {type:'play', seat: rd.leader};
   pushState();
   playTurn(rd.leader);
@@ -1419,12 +1429,32 @@ function playCard(seat, card, opts){
   rd.playOrder.push(seat);
   const hadLeadSuit = rd.leadSuit;
   if(!rd.leadSuit) rd.leadSuit = card.s;
-  const wasAttempt = !skipTrumpCheck;
   logMsg(`${seatLabel(seat)} plays ${card.r}${SUIT_SYM[card.s]}.`);
+
+  // Singles round: the suit led in the very first trick becomes this round's
+  // trump (openly, not secret), replacing whatever the bid's trump was.
+  if(rd.singles!=null && !hadLeadSuit && rd.trump===null){
+    rd.trump = card.s;
+    rd.trumpRevealed = true;
+    logMsg(`${seatLabel(seat)} leads ${SUIT_NAME[card.s]} — this is the Single Trump colour for this round!`);
+    announce(`Single Trump colour: ${SUIT_SYM[card.s]} ${SUIT_NAME[card.s]}`);
+    const oppSeats = [0,1,2,3].filter(s=>TEAM[s]!==TEAM[rd.singles]);
+    const anyOppHasSuit = oppSeats.some(s=>rd.hands[s].some(c=>c.s===rd.trump));
+    if(!anyOppHasSuit){
+      logMsg('Neither opponent holds the Single Trump colour — Singles is automatically cancelled. Reverting to normal play.');
+      announce('Singles cancelled — neither opponent holds that suit!');
+      rd.singles = null;
+      rd.doubled = false;
+      rd.trump = rd.originalTrump;
+      rd.trumpRevealed = false;
+    }
+  }
+  const wasAttempt = !skipTrumpCheck;
   // Attempting trump reveals the suit to everyone regardless of whether this
   // specific card matches it — only whether THIS card wins as trump depends
-  // on the match (handled separately by beats()).
-  if(hadLeadSuit && card.s!==hadLeadSuit && !rd.trumpRevealed && wasAttempt){
+  // on the match (handled separately by beats()). Not relevant once Singles
+  // has already locked in (and revealed) the trump above.
+  if(rd.singles==null && hadLeadSuit && card.s!==hadLeadSuit && !rd.trumpRevealed && wasAttempt){
     rd.trumpRevealed = true;
     if(card.s===rd.trump){
       logMsg(`${seatLabel(seat)} trumps in! Trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}!`);
@@ -1468,7 +1498,22 @@ function resolveTrick(){
 
   rd.current = {}; rd.leadSuit = null; rd.playOrder = []; rd.trickNo++;
 
-  const cardsLeft = rd.hands[rd.first].length;
+  if(rd.singles!=null && rd.trickNo===2 && !rd.partnerRevealShown){
+    rd.partnerRevealShown = true;
+    logMsg(`${seatLabel(rd.singles)} may now view their partner's hand once.`);
+  }
+
+  if(rd.singles!=null && TEAM[winner.seat]!==TEAM[rd.singles]){
+    logMsg(`${seatLabel(winner.seat)} (opponent) won a trick — Singles has already failed, ending the round early.`);
+    announce(`${seatLabel(winner.seat)} won a trick — Singles fails, round ends early.`);
+    rd.awaiting = {type:'trickPause'};
+    pushState();
+    setTimeout(endRound, 400);
+    return;
+  }
+
+  const cardCountSeat = (rd.singles!=null) ? rd.singles : rd.first;
+  const cardsLeft = rd.hands[cardCountSeat].length;
   if(cardsLeft===0){
     rd.awaiting = {type:'trickPause'};
     pushState();
@@ -1502,6 +1547,20 @@ function endRound(){
     pushState();
     return;
   }
+
+  const countA = rd.tricks.filter(t=>TEAM[t.winner]==='A').length;
+  const countB = rd.tricks.filter(t=>TEAM[t.winner]==='B').length;
+  const sweepTeam = countA===8 ? 'A' : countB===8 ? 'B' : null;
+
+  // Redouble rounds are all-or-nothing: a clean 8-0 sweep by either side is
+  // too extreme to score at ×4, so the round is voided instead.
+  if(rd.singles==null && rd.bidMultiplier===4 && sweepTeam){
+    logMsg(`${sweepTeam==='A'?seatLabel(0)+' & '+seatLabel(2):seatLabel(1)+' & '+seatLabel(3)} swept all 8 tricks on a redoubled round — too extreme, round cancelled.`);
+    rd.awaiting = {type:'redealAck', reason:'redoubleSweep', seat:rd.highBidder};
+    pushState();
+    return;
+  }
+
   const bidTeam = TEAM[rd.highBidder];
   const bidTeamPts = bidTeam==='A' ? rd.pointsA : rd.pointsB;
   const madeIt = bidTeamPts >= rd.highBid;
@@ -1518,6 +1577,15 @@ function endRound(){
   let pairNote = '';
   ['A','B'].forEach(t=>{ if(rd.pairDeclared[t]) pairNote += ` Team ${t} banked the pair bonus (+4).`; });
 
+  // Sweep bonus: only for normal/double rounds (not redoubled, not Singles) —
+  // whichever side wins all 8 tricks gets +1 extra, on top of the usual swing.
+  let sweepNote = '';
+  if(rd.singles==null && rd.bidMultiplier!==4 && sweepTeam){
+    applyGamePoints(sweepTeam, 1);
+    const sweepNames = sweepTeam==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
+    sweepNote = ` ${sweepNames} swept all 8 tricks — +1 bonus point!`;
+  }
+
   applyGamePoints(bidTeam, gamePts);
   if(singlesTeam) applyGamePoints(singlesTeam, singlesGamePts);
 
@@ -1530,7 +1598,7 @@ function endRound(){
   if(G.scoreB>0 && G.scoreB%6===0) milestoneNote += ` 🎉 ${seatLabel(1)} & ${seatLabel(3)} have reached ${G.scoreB} points!`;
 
   const multNote = rd.bidMultiplier===4 ? ' (Redoubled — ×4!)' : rd.bidMultiplier===2 ? ' (Doubled — ×2)' : '';
-  const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}${multNote}.${pairNote}${singlesNote}${milestoneNote}`;
+  const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}${multNote}.${pairNote}${singlesNote}${sweepNote}${milestoneNote}`;
   logMsg('Round over. '+overText);
 
   rd.awaiting = {type:'roundEndAck', overText};
@@ -1613,6 +1681,25 @@ function renderTable(){
 function renderScore(){
   document.getElementById('scoreA').textContent = G.scoreA;
   document.getElementById('scoreB').textContent = G.scoreB;
+  const single = G.boardMode==='single';
+  document.getElementById('podA').classList.toggle('hidden', single);
+  document.getElementById('podB').classList.toggle('hidden', single);
+  document.getElementById('podUnified').classList.toggle('hidden', !single);
+  if(single){
+    const diff = G.scoreA - G.scoreB;
+    const lblEl = document.getElementById('unifiedLabel');
+    const valEl = document.getElementById('unifiedScore');
+    if(diff===0){
+      lblEl.textContent = 'Score';
+      valEl.textContent = 0;
+    } else if(diff>0){
+      lblEl.textContent = seatLabel(0)+' & '+seatLabel(2);
+      valEl.textContent = diff;
+    } else {
+      lblEl.textContent = seatLabel(1)+' & '+seatLabel(3);
+      valEl.textContent = -diff;
+    }
+  }
 }
 function renderBoardStrip(){
   const el = document.getElementById('boardstrip');
@@ -1643,6 +1730,35 @@ function renderAll(){
   renderHand();
   renderLog();
   checkToast();
+  checkPartnerReveal();
+}
+let partnerRevealShownLocally = false;
+function checkPartnerReveal(){
+  if(!G || !G.round || MY_SEAT==null) return;
+  const rd = G.round;
+  if(rd.singles===MY_SEAT && rd.partnerRevealShown && !partnerRevealShownLocally){
+    partnerRevealShownLocally = true;
+    const partnerSeat = PARTNER[MY_SEAT];
+    const hand = (rd.hands[partnerSeat]||[]).slice().sort((a,b)=>{
+      if(a.s!==b.s) return SUITS.indexOf(a.s)-SUITS.indexOf(b.s);
+      return rankIdx(a.r)-rankIdx(b.r);
+    });
+    document.getElementById('ovTitle').textContent = "Your Partner's Hand";
+    document.getElementById('ovText').textContent = "A one-time look — this won't be shown again this round.";
+    const row = document.getElementById('ovBtns');
+    row.innerHTML = '';
+    const cardRow = document.createElement('div');
+    cardRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin:8px 0;';
+    for(const c of hand) cardRow.appendChild(cardEl(c, 'trickcard'));
+    row.appendChild(cardRow);
+    const btn = document.createElement('button');
+    btn.className = 'btn primary';
+    btn.textContent = 'Close';
+    btn.style.marginTop = '8px';
+    btn.addEventListener('click', hideOverlay);
+    row.appendChild(btn);
+    document.getElementById('overlay').classList.remove('hidden');
+  }
 }
 
 /* ---------------- OVERLAYS (host-gated where noted) ---------------- */
@@ -1656,6 +1772,8 @@ function showRedealOverlay(){
     ? `${seatLabel(rd.awaiting.seat)} held all four Jacks.`
     : rd.awaiting.reason==='notrumpshown'
     ? `The trump suit was never shown during play.`
+    : rd.awaiting.reason==='redoubleSweep'
+    ? `One side swept all 8 tricks on a redoubled round — too extreme to score.`
     : `${seatLabel(rd.awaiting.seat)}'s side had no trump cards at all.`;
   showOverlay('Round Cancelled', reasonText+' Re-dealing with the next dealer.',
     overlayBtnList([{label:'Continue', cls:'primary', fn:()=>{

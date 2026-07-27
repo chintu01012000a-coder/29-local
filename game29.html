@@ -1530,7 +1530,7 @@ function playCard(seat, card, opts){
   if(playedSeats.length + outCount === 4){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(resolveTrick, 250);
+    setTimeout(resolveTrick, 1000);
   } else {
     playTurn(nextSeat(seat));
     pushState();

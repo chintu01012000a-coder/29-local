@@ -854,7 +854,7 @@ function bidTurn(seat){
     }
     advanceBid(seat);
     pushState();
-  }, 550);
+  }, 150);
 }
 function advanceBid(seat){
   const rd = G.round;
@@ -1003,8 +1003,7 @@ function finishSecondOption(idx){
   const cards = rd.pendingSecondOption;
   const chosen = cards[idx];
   rd.trump = chosen.s;
-  rd.trumpRevealed = (G.trumpMode==='show');
-  if(rd.trumpRevealed) announce(`Trump is ${SUIT_SYM[chosen.s]} ${SUIT_NAME[chosen.s]}!`);
+  rd.trumpRevealed = false;
   rd.secondOptionSeat = MY_SEAT;
   rd.secondOptionCards = cards; // held back — only added to your hand at the same
                                  // moment everyone else gets their next 4 cards
@@ -1028,13 +1027,8 @@ function finishSecondOption(idx){
 function setTrump(suit){
   const rd = G.round;
   rd.trump = suit;
-  rd.trumpRevealed = (G.trumpMode==='show');
-  if(rd.trumpRevealed){
-    logMsg(`Trump chosen by ${seatLabel(rd.highBidder)}: ${SUIT_SYM[suit]} ${SUIT_NAME[suit]} (Show Trump — revealed to everyone).`);
-    announce(`Trump is ${SUIT_SYM[suit]} ${SUIT_NAME[suit]}!`);
-  } else {
-    logMsg(`Trump chosen secretly by ${seatLabel(rd.highBidder)}.`);
-  }
+  rd.trumpRevealed = false;
+  logMsg(`Trump chosen secretly by ${seatLabel(rd.highBidder)}.`);
   startBidDoubleOffers();
 }
 
@@ -1090,7 +1084,7 @@ function doBidDoubleOfferStep(){
             rd2.bidDoubleSkipped = rd2.bidDoubleSkipped||[]; rd2.bidDoubleSkipped.push(opp);
             checkBidDoubleResolution();
           }
-        }, 600+Math.random()*400);
+        }, 150+Math.random()*150);
         return;
       }
     }
@@ -1155,7 +1149,7 @@ function doRedoubleOfferStep(){
             rd2.redoubleSkipped = rd2.redoubleSkipped||[]; rd2.redoubleSkipped.push(s);
             checkRedoubleResolution();
           }
-        }, 600+Math.random()*400);
+        }, 150+Math.random()*150);
         return;
       }
     }
@@ -1262,7 +1256,7 @@ function doSinglesOfferStep(){
             announce(`${seatLabel(s)} chose No Single.`);
             checkSinglesResolution();
           }
-        }, 600+Math.random()*400);
+        }, 150+Math.random()*150);
         return;
       }
     }
@@ -1365,7 +1359,7 @@ function playTurn(seat){
   if(seatOutOfPlay(seat)){ playTurn(nextSeat(seat)); return; }
   rd.awaiting = {type:'play', seat};
   const legal = legalCards(seat);
-  if(legal.length===1 && rd.hands[seat].length===1){
+  if(legal.length===1){
     if(!authorizedFor(seat)) return;
     playCard(seat, legal[0]);
     return;
@@ -1380,7 +1374,7 @@ function playTurn(seat){
   else { setTimeout(()=>{
     if(!G || !G.round || G.round.awaiting.type!=='play' || G.round.awaiting.seat!==seat) return;
     computerPlay(seat, legalCards(seat));
-  }, 700); }
+  }, 250); }
 }
 function legalIsDiscardOnly(seat){
   const rd = G.round;
@@ -1398,6 +1392,14 @@ function presentHumanPlay(legal){
     setPlayable([]);
     setCenterActions([
       {label:'Trump', cls:'primary', fn:()=>{
+        if(G.trumpMode==='show'){
+          rd.trumpRevealed = true;
+          logMsg(`${seatLabel(MY_SEAT)} chose to Trump — trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}.`);
+          announce(`Trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}`);
+          pushState();
+          presentHumanPlay(legal);
+          return;
+        }
         TRUMP_ATTEMPT_MODE = true;
         setPanelMsg('Choose one of your own cards to attempt trump with.');
         setCenterActions([]);
@@ -1451,8 +1453,14 @@ function computerPlay(seat, legal){
       // decides not to attempt trump this time — a safe discard regardless of suit
       choice = legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
       skipTrumpCheck = true;
+    } else if(!rd.trumpRevealed && G.trumpMode==='show'){
+      // Show Trump: attempting trump reveals it FIRST, then they choose informed
+      rd.trumpRevealed = true;
+      logMsg(`${seatLabel(seat)} chose to Trump — trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}.`);
+      announce(`Trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}`);
+      choice = trumpsInHand.length>0 ? trumpsInHand[0] : legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
     } else {
-      // attempts trump by choosing a card, not knowing whether it matches
+      // Hidden Trump: attempts trump by choosing a card, not knowing whether it matches
       choice = legal.slice().sort((a,b)=>rankIdx(a.r)-rankIdx(b.r))[0];
     }
   } else {
@@ -1485,10 +1493,21 @@ function playCard(seat, card, opts){
     if(!anyOppHasSuit){
       logMsg('Neither opponent holds the Single Trump colour — Singles is automatically cancelled. Reverting to normal play.');
       announce('Singles cancelled — neither opponent holds that suit!');
+      // Undo the leading card entirely — the whole trick restarts fresh
+      // under normal rules, led by the normal (non-Singles) leader.
+      rd.hands[seat].push(card);
+      delete rd.current[seat];
+      rd.playOrder = [];
+      rd.leadSuit = null;
       rd.singles = null;
       rd.doubled = false;
       rd.trump = rd.originalTrump;
       rd.trumpRevealed = false;
+      rd.leader = rd.first;
+      rd.awaiting = {type:'play', seat: rd.first};
+      pushState();
+      playTurn(rd.first);
+      return;
     }
   }
   const wasAttempt = !skipTrumpCheck;
@@ -1511,7 +1530,7 @@ function playCard(seat, card, opts){
   if(playedSeats.length + outCount === 4){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(resolveTrick, 700);
+    setTimeout(resolveTrick, 250);
   } else {
     playTurn(nextSeat(seat));
     pushState();
@@ -1564,7 +1583,7 @@ function resolveTrick(){
     rd.leader = winner.seat;
     rd.awaiting = {type:'play', seat: winner.seat};
     pushState();
-    setTimeout(()=>playTurn(winner.seat), 400);
+    setTimeout(()=>playTurn(winner.seat), 50);
   }
 }
 
@@ -1572,13 +1591,20 @@ function resolveTrick(){
 function applyGamePoints(team, pts){
   const other = team==='A' ? 'B' : 'A';
   const current = team==='A' ? G.scoreA : G.scoreB;
-  if(pts<0 && current===0){
-    if(other==='A') G.scoreA += Math.abs(pts); else G.scoreB += Math.abs(pts);
-    const teamNames = team==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
-    const otherNames = other==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
-    logMsg(`${teamNames} were already at 0 — the ${Math.abs(pts)} point(s) go to ${otherNames} instead.`);
+  if(pts<0){
+    const newVal = current + pts;
+    if(newVal<0){
+      const overflow = -newVal; // the part that would have gone below zero
+      if(team==='A'){ G.scoreA = 0; G.scoreB += overflow; }
+      else { G.scoreB = 0; G.scoreA += overflow; }
+      const teamNames = team==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
+      const otherNames = other==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
+      logMsg(`${teamNames} would have dropped below 0 — the ${overflow} extra point(s) go to ${otherNames} instead.`);
+    } else {
+      if(team==='A') G.scoreA = newVal; else G.scoreB = newVal;
+    }
   } else {
-    if(team==='A') G.scoreA = Math.max(0, G.scoreA + pts); else G.scoreB = Math.max(0, G.scoreB + pts);
+    if(team==='A') G.scoreA += pts; else G.scoreB += pts;
   }
 }
 function endRound(){
@@ -1606,30 +1632,51 @@ function endRound(){
   const bidTeam = TEAM[rd.highBidder];
   const bidTeamPts = bidTeam==='A' ? rd.pointsA : rd.pointsB;
   const madeIt = bidTeamPts >= rd.highBid;
-  let gamePts = (madeIt ? 1 : -1) * (rd.bidMultiplier||1);
 
-  let singlesNote = '', singlesGamePts = 0, singlesTeam = null;
-  if(rd.singles!=null){
-    const wonAll = rd.tricks.every(t=>t.winner===rd.singles);
-    singlesGamePts = wonAll ? 3 : -3;
-    if(rd.doubled) singlesGamePts *= 2;
-    singlesTeam = TEAM[rd.singles];
-    singlesNote = ` ${seatLabel(rd.singles)} played Singles and ${wonAll?'took every trick':'missed at least one trick'} (${singlesGamePts>0?'+':''}${singlesGamePts} game pts${rd.doubled?', doubled':''}).`;
-  }
-  let pairNote = '';
+  let overText, pairNote = '';
   ['A','B'].forEach(t=>{ if(rd.pairDeclared[t]) pairNote += ` Team ${t} banked the pair bonus (+4).`; });
 
-  // Sweep bonus: only for normal/double rounds (not redoubled, not Singles) —
-  // whichever side wins all 8 tricks gets +1 extra, on top of the usual swing.
+  if(rd.singles!=null){
+    // Singles ignores the bid entirely — the ONLY thing that matters is
+    // whether the Singles player took every trick. Success scores for their
+    // side; failure scores for the OPPONENT side outright (not a penalty to
+    // the Singles side that might get floored at zero).
+    const wonAll = rd.tricks.every(t=>t.winner===rd.singles);
+    let pts = wonAll ? 3 : -3;
+    if(rd.doubled) pts *= 2;
+    const singlesTeam = TEAM[rd.singles];
+    const oppTeam = singlesTeam==='A' ? 'B' : 'A';
+    if(wonAll){
+      applyGamePoints(singlesTeam, Math.abs(pts));
+    } else {
+      applyGamePoints(oppTeam, Math.abs(pts));
+    }
+    const singlesNote = ` ${seatLabel(rd.singles)} played Singles and ${wonAll?'took every trick':'missed at least one trick'} — ${wonAll?'their side':'the opponents'} score ${Math.abs(pts)} point(s)${rd.doubled?' (doubled)':''}.`;
+    overText = `Singles round.${singlesNote}${pairNote}`;
+    logMsg('Round over. '+overText);
+    G.roundHistory = G.roundHistory || [];
+    G.roundHistory.push({
+      n: G.roundHistory.length+1, bidder: seatLabel(rd.highBidder), bidTeam,
+      bid: rd.highBid, took: bidTeamPts, madeIt: wonAll, mult: rd.bidMultiplier||1,
+      singlesPlayer: seatLabel(rd.singles), sweepTeam: null, scoreA: G.scoreA, scoreB: G.scoreB,
+    });
+    rd.awaiting = {type:'roundEndAck', overText};
+    pushState();
+    return;
+  }
+
+  let gamePts = (madeIt ? 1 : -1) * (rd.bidMultiplier||1);
+
+  // Sweep bonus: only for normal/double rounds (not redoubled) — whichever
+  // side wins all 8 tricks gets +1 extra, on top of the usual swing.
   let sweepNote = '';
-  if(rd.singles==null && rd.bidMultiplier!==4 && sweepTeam){
+  if(rd.bidMultiplier!==4 && sweepTeam){
     applyGamePoints(sweepTeam, 1);
     const sweepNames = sweepTeam==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
     sweepNote = ` ${sweepNames} swept all 8 tricks — +1 bonus point!`;
   }
 
   applyGamePoints(bidTeam, gamePts);
-  if(singlesTeam) applyGamePoints(singlesTeam, singlesGamePts);
 
   if(G.boardMode==='double'){
     if(madeIt) G.boxes[bidTeam].red = true; else G.boxes[bidTeam].black = true;
@@ -1640,7 +1687,7 @@ function endRound(){
   if(G.scoreB>0 && G.scoreB%6===0) milestoneNote += ` 🎉 ${seatLabel(1)} & ${seatLabel(3)} have reached ${G.scoreB} points!`;
 
   const multNote = rd.bidMultiplier===4 ? ' (Redoubled — ×4!)' : rd.bidMultiplier===2 ? ' (Doubled — ×2)' : '';
-  const overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}${multNote}.${pairNote}${singlesNote}${sweepNote}${milestoneNote}`;
+  overText = `${seatLabel(rd.highBidder)}'s side needed ${rd.highBid} and took ${bidTeamPts} card points — ${madeIt?'bid made':'bid failed'}${multNote}.${pairNote}${sweepNote}${milestoneNote}`;
   logMsg('Round over. '+overText);
 
   G.roundHistory = G.roundHistory || [];
@@ -1652,7 +1699,7 @@ function endRound(){
     took: bidTeamPts,
     madeIt,
     mult: rd.bidMultiplier||1,
-    singlesPlayer: rd.singles!=null ? seatLabel(rd.singles) : null,
+    singlesPlayer: null,
     sweepTeam,
     scoreA: G.scoreA,
     scoreB: G.scoreB,

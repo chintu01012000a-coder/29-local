@@ -1002,6 +1002,16 @@ function finishSecondOption(idx){
   const rd = G.round; // fresh — do not rely on any closured reference from earlier
   const cards = rd.pendingSecondOption;
   const chosen = cards[idx];
+  const trumpCountInDraw = cards.filter(c=>c.s===chosen.s).length;
+  if(trumpCountInDraw===1 && G.trumpMode==='show'){
+    logMsg(`${seatLabel(MY_SEAT)} drew only one ${SUIT_NAME[chosen.s]} card via the "2nd" option — round cancelled (Show Trump rule).`);
+    announce('Round cancelled — too little trump support from the "2nd" option.');
+    rd.pendingSecondOption = null;
+    rd.awaiting = {type:'redealAck', reason:'weakSecondOption', seat: MY_SEAT};
+    pushState();
+    showRedealOverlay();
+    return;
+  }
   rd.trump = chosen.s;
   rd.trumpRevealed = false;
   rd.secondOptionSeat = MY_SEAT;
@@ -1530,7 +1540,7 @@ function playCard(seat, card, opts){
   if(playedSeats.length + outCount === 4){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(resolveTrick, 2500);
+    setTimeout(resolveTrick, 2000);
   } else {
     playTurn(nextSeat(seat));
     pushState();
@@ -1721,6 +1731,7 @@ function renderTrumpSeed(){
   el.classList.toggle('attach-above', slot==='Bottom');
   if(!rd.trump){ el.innerHTML='<div style="font-size:9px">trump<br>hidden</div>'; el.classList.remove('revealed'); return; }
   if(rd.trumpRevealed){ el.innerHTML = `<div style="font-size:22px">${SUIT_SYM[rd.trump]}</div>`; el.classList.add('revealed'); }
+  else if(MY_SEAT===rd.highBidder){ el.innerHTML = `<div style="font-size:18px">${SUIT_SYM[rd.trump]}</div><div style="font-size:7px">(secret)</div>`; el.classList.remove('revealed'); }
   else { el.innerHTML='<div style="font-size:9px">trump<br>hidden</div>'; el.classList.remove('revealed'); }
 }
 function cardEl(card, extraClass){
@@ -1915,6 +1926,8 @@ function showRedealOverlay(){
     ? `The trump suit was never shown during play.`
     : rd.awaiting.reason==='redoubleSweep'
     ? `One side swept all 8 tricks on a redoubled round — too extreme to score.`
+    : rd.awaiting.reason==='weakSecondOption'
+    ? `${seatLabel(rd.awaiting.seat)} drew only one card of that suit via the "2nd" option — too little trump support (Show Trump rule).`
     : `${seatLabel(rd.awaiting.seat)}'s side had no trump cards at all.`;
   showOverlay('Round Cancelled', reasonText+' Re-dealing with the next dealer.',
     overlayBtnList([{label:'Continue', cls:'primary', fn:()=>{

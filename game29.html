@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -458,7 +459,10 @@ let PLAYABLE_IDS = [];
 
 /* ---------------- SEAT / IDENTITY HELPERS ---------------- */
 function isComputerSeat(seat){ return ROOM && ROOM.seats[seat] && ROOM.seats[seat].type==='cpu'; }
-function humanSeatsList(){ return [0,1,2,3].filter(s=>!isComputerSeat(s)); }
+function humanSeatsList(){
+  if(!ROOM || !ROOM.seats) return MY_SEAT!=null ? [MY_SEAT] : [];
+  return [0,1,2,3].filter(s=>!isComputerSeat(s));
+}
 function seatLabel(seat){
   if(seat===MY_SEAT) return 'You';
   if(!ROOM || !ROOM.seats[seat]) return '...';
@@ -492,8 +496,8 @@ function subscribeState(){
       const incoming = JSON.parse(data.blob);
       if(G && typeof G.seq==='number' && typeof incoming.seq==='number' && incoming.seq < G.seq) return;
       G = incoming;
-      renderAll();
-      resumeFlow();
+      try { renderAll(); } catch(e){ console.error('renderAll failed', e); }
+      try { resumeFlow(); } catch(e){ console.error('resumeFlow failed', e); }
     }, e=>{ console.error('subscribeState error', e); alert('Lost connection to the game: '+e.message); });
 }
 function subscribeRoom(code){
@@ -854,7 +858,7 @@ function bidTurn(seat){
     }
     advanceBid(seat);
     pushState();
-  }, 150);
+  }, 550);
 }
 function advanceBid(seat){
   const rd = G.round;
@@ -1002,9 +1006,9 @@ function finishSecondOption(idx){
   const rd = G.round; // fresh — do not rely on any closured reference from earlier
   const cards = rd.pendingSecondOption;
   const chosen = cards[idx];
-  const trumpCountInDraw = cards.filter(c=>c.s===chosen.s).length;
-  if(trumpCountInDraw===1 && G.trumpMode==='show'){
-    logMsg(`${seatLabel(MY_SEAT)} drew only one ${SUIT_NAME[chosen.s]} card via the "2nd" option — round cancelled (Show Trump rule).`);
+  const trumpCountTotal = rd.hands[MY_SEAT].filter(c=>c.s===chosen.s).length + cards.filter(c=>c.s===chosen.s).length;
+  if(trumpCountTotal===1 && G.trumpMode==='show'){
+    logMsg(`${seatLabel(MY_SEAT)} only has one ${SUIT_NAME[chosen.s]} card across their whole 8-card hand — round cancelled (Show Trump rule).`);
     announce('Round cancelled — too little trump support from the "2nd" option.');
     rd.pendingSecondOption = null;
     rd.awaiting = {type:'redealAck', reason:'weakSecondOption', seat: MY_SEAT};
@@ -1094,7 +1098,7 @@ function doBidDoubleOfferStep(){
             rd2.bidDoubleSkipped = rd2.bidDoubleSkipped||[]; rd2.bidDoubleSkipped.push(opp);
             checkBidDoubleResolution();
           }
-        }, 150+Math.random()*150);
+        }, 600+Math.random()*400);
         return;
       }
     }
@@ -1159,7 +1163,7 @@ function doRedoubleOfferStep(){
             rd2.redoubleSkipped = rd2.redoubleSkipped||[]; rd2.redoubleSkipped.push(s);
             checkRedoubleResolution();
           }
-        }, 150+Math.random()*150);
+        }, 600+Math.random()*400);
         return;
       }
     }
@@ -1266,7 +1270,7 @@ function doSinglesOfferStep(){
             announce(`${seatLabel(s)} chose No Single.`);
             checkSinglesResolution();
           }
-        }, 150+Math.random()*150);
+        }, 600+Math.random()*400);
         return;
       }
     }
@@ -1384,7 +1388,7 @@ function playTurn(seat){
   else { setTimeout(()=>{
     if(!G || !G.round || G.round.awaiting.type!=='play' || G.round.awaiting.seat!==seat) return;
     computerPlay(seat, legalCards(seat));
-  }, 250); }
+  }, 700); }
 }
 function legalIsDiscardOnly(seat){
   const rd = G.round;
@@ -1540,7 +1544,7 @@ function playCard(seat, card, opts){
   if(playedSeats.length + outCount === 4){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(resolveTrick, 2000);
+    setTimeout(resolveTrick, 1000);
   } else {
     playTurn(nextSeat(seat));
     pushState();
@@ -1579,7 +1583,7 @@ function resolveTrick(){
     announce(`${seatLabel(winner.seat)} won a trick — Singles fails, round ends early.`);
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(endRound, 400);
+    setTimeout(()=>{ try{ endRound(); }catch(e){ console.error('endRound failed', e); } }, 400);
     return;
   }
 
@@ -1588,12 +1592,12 @@ function resolveTrick(){
   if(cardsLeft===0){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(endRound, 400);
+    setTimeout(()=>{ try{ endRound(); }catch(e){ console.error('endRound failed', e); } }, 400);
   } else {
     rd.leader = winner.seat;
     rd.awaiting = {type:'play', seat: winner.seat};
     pushState();
-    setTimeout(()=>playTurn(winner.seat), 50);
+    setTimeout(()=>playTurn(winner.seat), 100);
   }
 }
 
@@ -1874,15 +1878,10 @@ function renderHistory(){
   }
 }
 function renderAll(){
-  renderScore();
-  renderBoardStrip();
-  renderTable();
-  renderHand();
-  renderLog();
-  renderHistory();
-  checkToast();
-  checkPartnerReveal();
-  checkCancelVotes();
+  const steps = [renderScore, renderBoardStrip, renderTable, renderHand, renderLog, renderHistory, checkToast, checkPartnerReveal, checkCancelVotes];
+  for(const fn of steps){
+    try { fn(); } catch(e){ console.error((fn.name||'render step')+' failed', e); }
+  }
 }
 let partnerRevealShownLocally = false;
 function checkPartnerReveal(){
@@ -1927,7 +1926,7 @@ function showRedealOverlay(){
     : rd.awaiting.reason==='redoubleSweep'
     ? `One side swept all 8 tricks on a redoubled round — too extreme to score.`
     : rd.awaiting.reason==='weakSecondOption'
-    ? `${seatLabel(rd.awaiting.seat)} drew only one card of that suit via the "2nd" option — too little trump support (Show Trump rule).`
+    ? `${seatLabel(rd.awaiting.seat)} only has one card of that suit across their whole 8-card hand — too little trump support (Show Trump rule).`
     : `${seatLabel(rd.awaiting.seat)}'s side had no trump cards at all.`;
   showOverlay('Round Cancelled', reasonText+' Re-dealing with the next dealer.',
     overlayBtnList([{label:'Continue', cls:'primary', fn:()=>{
@@ -1949,11 +1948,27 @@ function showRoundEndOverlay(){
     btns.push({label:'Next Round', cls:'primary', fn:()=>{
       rd.readyNext.push(MY_SEAT);
       logMsg(`${seatLabel(MY_SEAT)} is ready for the next round.`);
-      pushState();
-      showRoundEndOverlay();
+      if(IS_HOST && humanSeatsList().every(s=>rd.readyNext.includes(s))){
+        // This is the final confirmation and I'm host — go straight to the
+        // new round instead of also pushing the now-stale old-round state,
+        // which could otherwise race against and clobber the new round.
+        G.dealer = nextSeat(G.dealer);
+        hostStartRound();
+      } else {
+        pushState();
+        showRoundEndOverlay();
+      }
     }});
   }
   btns.push({label:'View Log', cls:'ghost', fn:()=>{ document.getElementById('logBox').classList.add('show'); }});
+  if(IS_HOST){
+    btns.push({label:'Force Next Round', cls:'ghost', fn:()=>{
+      if(confirm('Skip waiting and start the next round now?')){
+        G.dealer = nextSeat(G.dealer);
+        hostStartRound();
+      }
+    }});
+  }
   const readyText = myReady ? `\n\nWaiting on everyone else... (ready: ${readyNames})` : `\n\nReady so far: ${readyNames}`;
   showOverlay('Round Result', G.round.awaiting.overText+readyText, btns);
 }

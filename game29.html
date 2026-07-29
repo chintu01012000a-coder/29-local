@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -159,9 +158,9 @@ body{
   display:flex; align-items:center; justify-content:center;
   transition: all .25s ease;
 }
-#slotBottom{ bottom:2px; }
+#slotBottom{ bottom:2px; left:50%; transform:translateX(-50%); }
 #slotLeft{ left:6px; top:50%; transform:translateY(-50%);}
-#slotTop{ top:2px; }
+#slotTop{ top:2px; left:50%; transform:translateX(-50%); }
 #slotRight{ right:6px; top:50%; transform:translateY(-50%);}
 
 .trumpseed{
@@ -181,7 +180,7 @@ body{
 }
 .centerActions:empty{ display:none; }
 .centerActions .btn{
-  background:rgba(6,32,24,0.9); box-shadow:0 4px 10px rgba(0,0,0,0.4);
+  box-shadow:0 4px 10px rgba(0,0,0,0.4);
 }
 .tableToast{
   position:absolute; left:50%; top:-46px; transform:translate(-50%,-8px);
@@ -496,10 +495,22 @@ function subscribeState(){
       const incoming = JSON.parse(data.blob);
       if(G && typeof G.seq==='number' && typeof incoming.seq==='number' && incoming.seq < G.seq) return;
       G = incoming;
+      lastStateChangeAt = Date.now();
       try { renderAll(); } catch(e){ console.error('renderAll failed', e); }
       try { resumeFlow(); } catch(e){ console.error('resumeFlow failed', e); }
     }, e=>{ console.error('subscribeState error', e); alert('Lost connection to the game: '+e.message); });
+  if(!watchdogTimer){
+    watchdogTimer = setInterval(()=>{
+      if(!G || !G.round || !IS_HOST) return;
+      if(Date.now() - lastStateChangeAt > 6000){
+        lastStateChangeAt = Date.now(); // avoid repeated nudges in a tight loop
+        try { resumeFlow(); } catch(e){ console.error('watchdog resumeFlow failed', e); }
+      }
+    }, 3000);
+  }
 }
+let lastStateChangeAt = Date.now();
+let watchdogTimer = null;
 function subscribeRoom(code){
   if(unsubRoom) unsubRoom();
   unsubRoom = db.collection(ROOMS).doc(code).onSnapshot(doc=>{
@@ -1544,7 +1555,7 @@ function playCard(seat, card, opts){
   if(playedSeats.length + outCount === 4){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(resolveTrick, 1000);
+    setTimeout(resolveTrick, 2000);
   } else {
     playTurn(nextSeat(seat));
     pushState();
@@ -1775,35 +1786,45 @@ function seatStatusSuffix(seat, rd){
 function renderTable(){
   if(!G || !G.round || MY_SEAT==null) return;
   const rd = G.round;
-  ['Left','Top','Right'].forEach(slot=>{
-    const seat = [0,1,2,3].find(s=>slotOf(s)===slot);
-    const wrap = document.getElementById('cb'+slot);
-    wrap.innerHTML='';
-    const n = rd.hands[seat] ? rd.hands[seat].length : 0;
-    for(let i=0;i<n;i++){ const b=document.createElement('div'); b.className='cardback'; wrap.appendChild(b); }
-    document.getElementById('seat'+slot).querySelector('.name').textContent =
-      seatLabel(seat) + seatStatusSuffix(seat, rd);
-  });
-  document.getElementById('seatBottom').querySelector('.name').textContent =
-    'You' + seatStatusSuffix(0, rd);
 
-  ['Bottom','Left','Top','Right'].forEach(slot=>{
-    document.getElementById('seat'+slot).classList.remove('active','bidder','dealer');
-  });
-  if(rd.highBidder!=null) document.getElementById('seat'+slotOf(rd.highBidder)).classList.add('bidder');
-  if(G.dealer!=null) document.getElementById('seat'+slotOf(G.dealer)).classList.add('dealer');
-  if(rd.awaiting && (rd.awaiting.type==='bid' || rd.awaiting.type==='play') && rd.awaiting.seat!=null){
-    document.getElementById('seat'+slotOf(rd.awaiting.seat)).classList.add('active');
-  }
+  // Trick slots first and unconditionally — this is the most visually
+  // important part, and must never be left stale by an error elsewhere below.
+  try {
+    ['Bottom','Left','Top','Right'].forEach(slot=>{
+      const seat = [0,1,2,3].find(s=>slotOf(s)===slot);
+      const slotEl = document.getElementById('slot'+slot);
+      slotEl.innerHTML='';
+      const card = rd.current[seat];
+      if(card) slotEl.appendChild(cardEl(card,'trickcard'));
+    });
+  } catch(e){ console.error('trick slot render failed', e); }
 
-  ['Bottom','Left','Top','Right'].forEach(slot=>{
-    const seat = [0,1,2,3].find(s=>slotOf(s)===slot);
-    const slotEl = document.getElementById('slot'+slot);
-    slotEl.innerHTML='';
-    const card = rd.current[seat];
-    if(card) slotEl.appendChild(cardEl(card,'trickcard'));
-  });
-  renderTrumpSeed();
+  try {
+    ['Left','Top','Right'].forEach(slot=>{
+      const seat = [0,1,2,3].find(s=>slotOf(s)===slot);
+      const wrap = document.getElementById('cb'+slot);
+      wrap.innerHTML='';
+      const n = rd.hands[seat] ? rd.hands[seat].length : 0;
+      for(let i=0;i<n;i++){ const b=document.createElement('div'); b.className='cardback'; wrap.appendChild(b); }
+      document.getElementById('seat'+slot).querySelector('.name').textContent =
+        seatLabel(seat) + seatStatusSuffix(seat, rd);
+    });
+    document.getElementById('seatBottom').querySelector('.name').textContent =
+      'You' + seatStatusSuffix(0, rd);
+  } catch(e){ console.error('seat label render failed', e); }
+
+  try {
+    ['Bottom','Left','Top','Right'].forEach(slot=>{
+      document.getElementById('seat'+slot).classList.remove('active','bidder','dealer');
+    });
+    if(rd.highBidder!=null) document.getElementById('seat'+slotOf(rd.highBidder)).classList.add('bidder');
+    if(G.dealer!=null) document.getElementById('seat'+slotOf(G.dealer)).classList.add('dealer');
+    if(rd.awaiting && (rd.awaiting.type==='bid' || rd.awaiting.type==='play') && rd.awaiting.seat!=null){
+      document.getElementById('seat'+slotOf(rd.awaiting.seat)).classList.add('active');
+    }
+  } catch(e){ console.error('seat class render failed', e); }
+
+  try { renderTrumpSeed(); } catch(e){ console.error('trump seed render failed', e); }
 }
 function renderScore(){
   document.getElementById('scoreA').textContent = G.scoreA;

@@ -150,18 +150,21 @@ body{
 #seatLeft, #seatRight{ align-self:center; }
 
 .centerTrick{
-  flex:1; position:relative; display:flex; align-items:center; justify-content:center;
-  min-height:120px;
+  flex:1; position:relative; display:grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  min-height:180px;
 }
 .trickslot{
-  position:absolute; width:44px; height:62px; border-radius:6px;
+  width:44px; height:62px; border-radius:6px;
   display:flex; align-items:center; justify-content:center;
+  align-self:center; justify-self:center;
   transition: all .25s ease;
 }
-#slotBottom{ bottom:2px; left:50%; transform:translateX(-50%); }
-#slotLeft{ left:6px; top:50%; transform:translateY(-50%);}
-#slotTop{ top:2px; left:50%; transform:translateX(-50%); }
-#slotRight{ right:6px; top:50%; transform:translateY(-50%);}
+#slotTop{ grid-row:1; grid-column:2; }
+#slotLeft{ grid-row:2; grid-column:1; }
+#slotRight{ grid-row:2; grid-column:3; }
+#slotBottom{ grid-row:3; grid-column:2; }
 
 .trumpseed{
   position:absolute; top:100%; left:50%; transform:translateX(-50%); margin-top:6px;
@@ -1281,7 +1284,7 @@ function doSinglesOfferStep(){
             announce(`${seatLabel(s)} chose No Single.`);
             checkSinglesResolution();
           }
-        }, 150+Math.random()*150);
+        }, 150+Math.random()*1500);
         return;
       }
     }

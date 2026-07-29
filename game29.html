@@ -869,7 +869,7 @@ function bidTurn(seat){
     }
     advanceBid(seat);
     pushState();
-  }, 550);
+  }, 150);
 }
 function advanceBid(seat){
   const rd = G.round;
@@ -1109,7 +1109,7 @@ function doBidDoubleOfferStep(){
             rd2.bidDoubleSkipped = rd2.bidDoubleSkipped||[]; rd2.bidDoubleSkipped.push(opp);
             checkBidDoubleResolution();
           }
-        }, 600+Math.random()*400);
+        }, 150+Math.random()*150);
         return;
       }
     }
@@ -1174,7 +1174,7 @@ function doRedoubleOfferStep(){
             rd2.redoubleSkipped = rd2.redoubleSkipped||[]; rd2.redoubleSkipped.push(s);
             checkRedoubleResolution();
           }
-        }, 600+Math.random()*400);
+        }, 150+Math.random()*150);
         return;
       }
     }
@@ -1281,7 +1281,7 @@ function doSinglesOfferStep(){
             announce(`${seatLabel(s)} chose No Single.`);
             checkSinglesResolution();
           }
-        }, 600+Math.random()*400);
+        }, 150+Math.random()*150);
         return;
       }
     }
@@ -1399,7 +1399,7 @@ function playTurn(seat){
   else { setTimeout(()=>{
     if(!G || !G.round || G.round.awaiting.type!=='play' || G.round.awaiting.seat!==seat) return;
     computerPlay(seat, legalCards(seat));
-  }, 700); }
+  }, 250); }
 }
 function legalIsDiscardOnly(seat){
   const rd = G.round;
@@ -1608,7 +1608,7 @@ function resolveTrick(){
     rd.leader = winner.seat;
     rd.awaiting = {type:'play', seat: winner.seat};
     pushState();
-    setTimeout(()=>playTurn(winner.seat), 100);
+    setTimeout(()=>playTurn(winner.seat), 50);
   }
 }
 

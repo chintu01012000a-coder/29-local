@@ -1375,20 +1375,13 @@ function legalCards(seat){
   const followers = hand.filter(c=>c.s===ledSuit);
   if(followers.length>0) return followers;
   const bestTrumpRank = currentBestTrumpRank(rd);
-  let base = hand.slice();
   if(bestTrumpRank!=null){
     // someone already trumped in this trick — small trump cards can't be
     // played under it; only a bigger trump or a non-trump discard is legal
     const overOrSafe = hand.filter(c=> c.s!==rd.trump || rankIdx(c.r)>bestTrumpRank);
-    if(overOrSafe.length>0) base = overOrSafe;
+    if(overOrSafe.length>0) return overOrSafe;
   }
-  // Show Trump: once the suit is known, you must play it whenever you can't
-  // follow suit and hold an eligible trump card — every trick, not just once.
-  if(G.trumpMode==='show' && rd.trumpRevealed && rd.singles==null){
-    const trumpEligible = base.filter(c=>c.s===rd.trump);
-    if(trumpEligible.length>0) return trumpEligible;
-  }
-  return base;
+  return hand.slice();
 }
 function seatOutOfPlay(seat){
   const rd = G.round;
@@ -1795,6 +1788,11 @@ function renderHand(){
     row.appendChild(el);
   }
 }
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
 function seatStatusSuffix(seat, rd){
   let s = '';
   if(rd.highBidder===seat && rd.highBid) s += ` (${rd.highBid})`;
@@ -1803,8 +1801,10 @@ function seatStatusSuffix(seat, rd){
   if(rd.singles===seat) s += ' 🃏S';
   if(rd.pairDeclaredBy===seat) s += ' 👑P';
   if(rd.highBidder===seat && rd.trump){
-    if(rd.trumpRevealed) s += ` ${SUIT_SYM[rd.trump]}`;
-    else if(MY_SEAT===seat) s += ` ${SUIT_SYM[rd.trump]}🔒`;
+    const isRed = RED_SUITS.includes(rd.trump);
+    const suitHtml = `<span style="font-size:19px;font-weight:800;color:${isRed?'#e05a5a':'#1c1712'};vertical-align:-2px;">${SUIT_SYM[rd.trump]}</span>`;
+    if(rd.trumpRevealed) s += ' '+suitHtml;
+    else if(MY_SEAT===seat) s += ' '+suitHtml+'<span style="font-size:10px;">🔒</span>';
     else s += ' 🂠';
   }
   return s;
@@ -1832,10 +1832,10 @@ function renderTable(){
       wrap.innerHTML='';
       const n = rd.hands[seat] ? rd.hands[seat].length : 0;
       for(let i=0;i<n;i++){ const b=document.createElement('div'); b.className='cardback'; wrap.appendChild(b); }
-      document.getElementById('seat'+slot).querySelector('.name').textContent =
-        seatLabel(seat) + seatStatusSuffix(seat, rd);
+      document.getElementById('seat'+slot).querySelector('.name').innerHTML =
+        escapeHtml(seatLabel(seat)) + seatStatusSuffix(seat, rd);
     });
-    document.getElementById('seatBottom').querySelector('.name').textContent =
+    document.getElementById('seatBottom').querySelector('.name').innerHTML =
       'You' + seatStatusSuffix(0, rd);
   } catch(e){ console.error('seat label render failed', e); }
 

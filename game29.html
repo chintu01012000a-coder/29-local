@@ -779,7 +779,7 @@ function hostStartRound(){
     pointsA:0, pointsB:0,
     pairDeclared:{A:false,B:false},
     singles:null, doubled:false, bidMultiplier:1, partnerRevealShown:false, originalTrump:null,
-    bidDoubleBy:null, redoubleBy:null, pairDeclaredBy:null,
+    bidDoubleBy:null, redoubleBy:null, pairDeclaredBy:null, forcedTrumpFor:null,
     phase:'bidding',
     awaiting:{type:'bid', seat:first},
     log:[]
@@ -1419,6 +1419,19 @@ function legalIsDiscardOnly(seat){
 let TRUMP_ATTEMPT_MODE = false; // true = this next card tap is a deliberate trump attempt
 function presentHumanPlay(legal){
   const rd = G.round;
+  if(rd.forcedTrumpFor===MY_SEAT){
+    const trumpCards = legal.filter(c=>c.s===rd.trump);
+    setPanelBtns([]);
+    setCenterActions([]);
+    if(trumpCards.length>0){
+      setPanelMsg(`Trump revealed: ${SUIT_NAME[rd.trump]} — you have trump, so you must play it.`);
+      setPlayable(trumpCards.map(c=>c.id));
+    } else {
+      setPanelMsg(`Trump revealed: ${SUIT_NAME[rd.trump]}, but you have none — play any card.`);
+      setPlayable(legal.map(c=>c.id));
+    }
+    return;
+  }
   const isVoid = rd.leadSuit && legalIsDiscardOnly(MY_SEAT) && !rd.trumpRevealed;
   if(isVoid){
     setPanelMsg(`You have no ${SUIT_NAME[rd.leadSuit]}.`);
@@ -1428,10 +1441,11 @@ function presentHumanPlay(legal){
       {label:'Trump', cls:'primary', fn:()=>{
         if(G.trumpMode==='show'){
           rd.trumpRevealed = true;
+          const trumpCards = legal.filter(c=>c.s===rd.trump);
+          if(trumpCards.length>0) rd.forcedTrumpFor = MY_SEAT;
           logMsg(`${pname(MY_SEAT)} chose to Trump — trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}.`);
           announce(`Trump revealed: ${SUIT_SYM[rd.trump]} ${SUIT_NAME[rd.trump]}`);
           pushState();
-          const trumpCards = legal.filter(c=>c.s===rd.trump);
           setCenterActions([]);
           if(trumpCards.length>0){
             setPanelMsg(`Trump revealed: ${SUIT_NAME[rd.trump]} — you have trump, so you must play it.`);
@@ -1518,6 +1532,7 @@ function playCard(seat, card, opts){
   const skipTrumpCheck = (seat===MY_SEAT) ? !TRUMP_ATTEMPT_MODE : !!opts.skipTrumpCheck;
   TRUMP_ATTEMPT_MODE = false;
   const rd = G.round;
+  if(rd.forcedTrumpFor===seat) rd.forcedTrumpFor = null;
   rd.hands[seat] = rd.hands[seat].filter(c=>c.id!==card.id);
   rd.current[seat] = card;
   rd.playOrder = rd.playOrder || [];
@@ -1575,7 +1590,7 @@ function playCard(seat, card, opts){
   if(playedSeats.length + outCount === 4){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(resolveTrick, 2000);
+    setTimeout(resolveTrick, 2500);
   } else {
     playTurn(nextSeat(seat));
     pushState();
@@ -1675,11 +1690,19 @@ function endRound(){
   }
 
   const bidTeam = TEAM[rd.highBidder];
+  const oppTeam = bidTeam==='A' ? 'B' : 'A';
   const bidTeamPts = bidTeam==='A' ? rd.pointsA : rd.pointsB;
-  const madeIt = bidTeamPts >= rd.highBid;
+  let effectiveBidTeamPts = bidTeamPts;
+  if(rd.pairDeclared[bidTeam]) effectiveBidTeamPts += 4;
+  if(rd.pairDeclared[oppTeam]) effectiveBidTeamPts -= 4;
+  const madeIt = effectiveBidTeamPts >= rd.highBid;
 
   let overText, pairNote = '';
-  ['A','B'].forEach(t=>{ if(rd.pairDeclared[t]) pairNote += ` Team ${t} banked the pair bonus (+4).`; });
+  if(rd.pairDeclared[bidTeam]) pairNote += ` ${seatLabel(rd.highBidder)}'s side declared the pair — needed only ${Math.max(0, rd.highBid-4)} real card points instead of ${rd.highBid}.`;
+  if(rd.pairDeclared[oppTeam]){
+    const oppNames = oppTeam==='A' ? (seatLabel(0)+' & '+seatLabel(2)) : (seatLabel(1)+' & '+seatLabel(3));
+    pairNote += ` ${oppNames} declared the pair — effectively worth +4 against the bid.`;
+  }
 
   if(rd.singles!=null){
     // Singles ignores the bid entirely — the ONLY thing that matters is

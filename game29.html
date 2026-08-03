@@ -784,6 +784,14 @@ function hostStartRound(){
     awaiting:{type:'bid', seat:first},
     log:[]
   };
+  const firstHandPts = hands[first].reduce((sum,c)=>sum+RANK_POINTS[c.r],0);
+  if(firstHandPts===0){
+    logMsg(`${pname(first)} (first to bid) was dealt four cards worth 0 points — round cancelled.`);
+    G.round.awaiting = {type:'redealAck', reason:'firstBidderNoPoints', seat:first};
+    pushState();
+    showRedealOverlay();
+    return;
+  }
   logMsg(`— New round — dealer: ${pname(G.dealer)}, first to bid: ${pname(first)}`);
   pushState();
 }
@@ -1236,6 +1244,24 @@ function dealRemaining(){
     showRedealOverlay();
     return;
   }
+  if(teamTrumpCount===8){
+    logMsg(`${pname(rd.highBidder)}'s side holds all 8 ${SUIT_NAME[rd.trump]} — opponents have none. Round cancelled.`);
+    rd.awaiting = {type:'redealAck', reason:'alltrump', seat:rd.highBidder};
+    pushState();
+    showRedealOverlay();
+    return;
+  }
+  for(const seat of [0,1,2,3]){
+    if(seat===rd.first) continue; // this rule doesn't apply to the first bidder
+    const pts = rd.hands[seat].reduce((sum,c)=>sum+RANK_POINTS[c.r],0);
+    if(pts===0){
+      logMsg(`${pname(seat)}'s full 8-card hand is worth 0 points — round cancelled.`);
+      rd.awaiting = {type:'redealAck', reason:'noPointsHand', seat};
+      pushState();
+      showRedealOverlay();
+      return;
+    }
+  }
 
   if(rd.bidMultiplier===4){
     logMsg('The bid was redoubled — Singles is not offered this round.');
@@ -1408,7 +1434,7 @@ function playTurn(seat){
   else { setTimeout(()=>{
     if(!G || !G.round || G.round.awaiting.type!=='play' || G.round.awaiting.seat!==seat) return;
     computerPlay(seat, legalCards(seat));
-  }, 250); }
+  }, 200); }
 }
 function legalIsDiscardOnly(seat){
   const rd = G.round;
@@ -1825,7 +1851,7 @@ function seatStatusSuffix(seat, rd){
   if(rd.pairDeclaredBy===seat) s += ' 👑P';
   if(rd.highBidder===seat && rd.trump){
     const isRed = RED_SUITS.includes(rd.trump);
-    const suitHtml = `<span style="font-size:19px;font-weight:800;color:${isRed?'#e05a5a':'#1c1712'};vertical-align:-2px;">${SUIT_SYM[rd.trump]}</span>`;
+    const suitHtml = `<span style="font-size:19px;font-weight:800;color:${isRed?'#e05a5a':'#f3ead8'};vertical-align:-2px;">${SUIT_SYM[rd.trump]}</span>`;
     if(rd.trumpRevealed) s += ' '+suitHtml;
     else if(MY_SEAT===seat) s += ' '+suitHtml+'<span style="font-size:10px;">🔒</span>';
     else s += ' 🂠';
@@ -1948,7 +1974,7 @@ function renderHistory(){
   }
 }
 function renderAll(){
-  const steps = [renderScore, renderBoardStrip, renderTable, renderHand, renderLog, renderHistory, checkToast, checkPartnerReveal, checkCancelVotes];
+  const steps = [renderScore, renderBoardStrip, renderTable, renderHand, renderLog, renderHistory, checkToast, checkPartnerReveal, checkCancelVotes, checkCancelRoundPrompt];
   for(const fn of steps){
     try { fn(); } catch(e){ console.error((fn.name||'render step')+' failed', e); }
   }
@@ -1997,6 +2023,12 @@ function showRedealOverlay(){
     ? `One side swept all 8 tricks on a redoubled round — too extreme to score.`
     : rd.awaiting.reason==='weakSecondOption'
     ? `${seatLabel(rd.awaiting.seat)} only has one card of that suit across their whole 8-card hand — too little trump support (Show Trump rule).`
+    : rd.awaiting.reason==='firstBidderNoPoints'
+    ? `${seatLabel(rd.awaiting.seat)} (first to bid) was dealt four cards worth 0 points.`
+    : rd.awaiting.reason==='noPointsHand'
+    ? `${seatLabel(rd.awaiting.seat)}'s full 8-card hand is worth 0 points.`
+    : rd.awaiting.reason==='alltrump'
+    ? `${seatLabel(rd.awaiting.seat)}'s side holds all 8 trump cards — the opponents have none.`
     : `${seatLabel(rd.awaiting.seat)}'s side had no trump cards at all.`;
   showOverlay('Round Cancelled', reasonText+' Re-dealing with the next dealer.',
     overlayBtnList([{label:'Continue', cls:'primary', fn:()=>{
@@ -2125,10 +2157,10 @@ document.getElementById('newGameBtn').addEventListener('click', ()=>{
   const rd = G.round;
   rd.cancelVotes = rd.cancelVotes || [];
   if(rd.cancelVotes.includes(MY_SEAT)){ alert('You already voted to cancel — waiting on the others.'); return; }
-  if(!confirm('Vote to cancel this round? It only cancels once everyone agrees.')) return;
+  if(!confirm('Ask everyone to cancel this round and re-deal?')) return;
   rd.cancelVotes.push(MY_SEAT);
-  logMsg(`${pname(MY_SEAT)} voted to cancel the round.`);
-  announce(`${seatLabel(MY_SEAT)} voted to cancel (${rd.cancelVotes.length}/${humanSeatsList().length})`);
+  logMsg(`${pname(MY_SEAT)} asked to cancel the round.`);
+  announce(`${pname(MY_SEAT)} wants to cancel the round (${rd.cancelVotes.length}/${humanSeatsList().length})`);
   pushState();
   checkCancelVotes();
 });
@@ -2138,6 +2170,34 @@ function checkCancelVotes(){
   if(IS_HOST && humanSeatsList().every(s=>(rd.cancelVotes||[]).includes(s))){
     cancelRound();
   }
+}
+let cancelPromptHandledFor = 0;
+function checkCancelRoundPrompt(){
+  if(!G || !G.round || MY_SEAT==null) return;
+  const rd = G.round;
+  const votes = rd.cancelVotes || [];
+  if(votes.length===0){ cancelPromptHandledFor = 0; return; }
+  if(votes.includes(MY_SEAT)) return;
+  if(cancelPromptHandledFor===votes.length) return;
+  cancelPromptHandledFor = votes.length;
+  const requesterNames = votes.map(s=>pname(s)).join(', ');
+  showOverlay('Cancel Round?', `${requesterNames} want${votes.length===1?'s':''} to cancel this round and re-deal. Do you agree?`, [
+    {label:'Agree', cls:'primary', fn:()=>{
+      hideOverlay();
+      rd.cancelVotes = rd.cancelVotes || [];
+      rd.cancelVotes.push(MY_SEAT);
+      logMsg(`${pname(MY_SEAT)} agreed to cancel the round.`);
+      pushState();
+      checkCancelVotes();
+    }},
+    {label:'Decline', cls:'ghost', fn:()=>{
+      hideOverlay();
+      logMsg(`${pname(MY_SEAT)} declined — cancel request withdrawn.`);
+      announce(`${pname(MY_SEAT)} declined the cancel request.`);
+      rd.cancelVotes = [];
+      pushState();
+    }}
+  ]);
 }
 document.getElementById('logToggle').addEventListener('click', ()=>{
   document.getElementById('logBox').classList.toggle('show');

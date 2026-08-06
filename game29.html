@@ -772,7 +772,7 @@ function hostStartRound(){
 
   G.round = {
     deck, hands, order4, first,
-    bidHistory: [], highBid: 0, highBidder: null, passed: [], starter: null,
+    bidHistory: [], highBid: 0, highBidder: null, passed: [],
     trump: null, trumpRevealed:false, secondOptionSeat:null,
     tricks: [], trickNo:0, leader:first,
     current: {}, leadSuit:null, playOrder:[],
@@ -825,7 +825,6 @@ function resumeFlow(){
   if(!aw) return;
   switch(aw.type){
     case 'bid': bidTurn(aw.seat); break;
-    case 'dealerForcedBid': doDealerForcedBid(aw.seat); break;
     case 'trump': doTrumpStep(aw.seat); break;
     case 'trumpSecondPick': doSecondOptionStep(aw.seat); break;
     case 'bidDoubleOffer': doBidDoubleOfferStep(); break;
@@ -840,25 +839,8 @@ function resumeFlow(){
 }
 
 /* ---------------- BIDDING ---------------- */
-function minAcceptableBid(seat){
-  const rd = G.round;
-  if(rd.highBid===0) return 16;
-  // The player who actually OPENED the auction (first real bid, not just first
-  // asked) may re-claim at the SAME number — everyone else must go higher.
-  if(seat===rd.starter && seat!==rd.highBidder) return rd.highBid;
-  return rd.highBid+1;
-}
 function bidTurn(seat){
   const rd = G.round;
-  const passedSet = new Set(rd.passed);
-  if(passedSet.size>=3 && rd.highBidder!=null){ rd.awaiting={type:'bid',seat}; finishBidding(); return; }
-  if(passedSet.size===4){
-    rd.awaiting = {type:'dealerForcedBid', seat: G.dealer};
-    pushState();
-    doDealerForcedBid(G.dealer);
-    return;
-  }
-  if(passedSet.has(seat)){ bidTurn(nextSeat(seat)); return; } // already out of this auction
   rd.awaiting = {type:'bid', seat};
   if(!authorizedFor(seat)){
     clearDecisionUI();
@@ -870,70 +852,67 @@ function bidTurn(seat){
     if(!G || !G.round || G.round.awaiting.type!=='bid' || G.round.awaiting.seat!==seat) return;
     const rd = G.round; // re-read live state — G may have been replaced by a snapshot since we were scheduled
     const hand = rd.hands[seat];
-    const {suit, score} = handStrength(hand);
-    const minBid = minAcceptableBid(seat);
+    const {score} = handStrength(hand);
+    const isDealer = (seat===G.dealer);
+    const mustBid = isDealer && rd.highBid===0; // dealer can't pass if nobody has bid at all
+    const minBid = rd.highBid===0 ? 16 : rd.highBid+1;
     const comfortCap = Math.min(28, Math.round(16+score/3));
-    const isReclaim = (seat===rd.starter && seat!==rd.highBidder && rd.highBid>0);
     let action;
-    if(rd.highBid===0){ action = (score>9) ? {bid:16} : {pass:true}; }
+    if(mustBid){ action = {bid: Math.max(16, Math.min(minBid, Math.max(minBid,comfortCap)))}; }
     else if(minBid>28){ action = {pass:true}; }
-    else if(isReclaim ? minBid<=comfortCap+2 : minBid<=comfortCap){ action = {bid: minBid}; }
+    else if(minBid<=comfortCap){ action = {bid: minBid}; }
     else { action = {pass:true}; }
     if(action.pass){ rd.passed.push(seat); logMsg(`${pname(seat)} passes.`); }
-    else {
-      if(rd.starter==null) rd.starter = seat;
-      rd.highBid=action.bid; rd.highBidder=seat; logMsg(`${pname(seat)} bids ${action.bid}.`);
-    }
-    advanceBid(seat);
+    else { rd.highBid=action.bid; rd.highBidder=seat; logMsg(`${pname(seat)} bids ${action.bid}${mustBid?' (forced, everyone else passed)':''}.`); }
+    advanceBidding(seat);
     pushState();
-  }, 150);
+  }, 550);
 }
-function advanceBid(seat){
-  const rd = G.round;
-  const passedSet = new Set(rd.passed);
-  if(passedSet.size>=3 && rd.highBidder!=null){ finishBidding(); return; }
-  if(passedSet.size===4){ bidTurn(nextSeat(seat)); return; }
+function advanceBidding(seat){
+  if(seat===G.dealer){ finishBidding(); return; } // dealer is always last in the sequence
   bidTurn(nextSeat(seat));
 }
 function biddingStatusText(){
   const rd = G.round;
   return [0,1,2,3].map(seat=>{
     const name = seat===MY_SEAT ? 'You' : seatLabel(seat);
-    if(rd.passed.includes(seat)) return `${name}: Passed`;
-    if(rd.highBidder===seat) return `${name}: Bid ${rd.highBid} ★`;
-    return `${name}: Deciding...`;
+    const dealerTag = seat===G.dealer ? ' (dealer)' : '';
+    if(rd.passed.includes(seat)) return `${name}${dealerTag}: Passed`;
+    if(rd.highBidder===seat) return `${name}${dealerTag}: Bid ${rd.highBid} ★`;
+    return `${name}${dealerTag}: Deciding...`;
   }).join('\n');
 }
 function presentHumanBid(){
   const rd = G.round;
-  const minBid = minAcceptableBid(MY_SEAT);
-  const isReclaim = (MY_SEAT===rd.starter && MY_SEAT!==rd.highBidder && rd.highBid>0);
-  setPanelMsg('Your turn to bid.');
+  const isDealer = (MY_SEAT===G.dealer);
+  const mustBid = isDealer && rd.highBid===0;
+  const minBid = rd.highBid===0 ? 16 : rd.highBid+1;
+  setPanelMsg(mustBid ? 'Everyone passed — as dealer you must bid.' : 'Your turn to bid.');
   setPanelBtns([]);
   const btns = [];
   for(let v=minBid; v<=28; v++){
-    const label = (v===minBid && isReclaim) ? `Match ${v}` : `Bid ${v}`;
-    btns.push({label, cls: v===minBid?'primary':'', fn:()=>{
+    btns.push({label:`Bid ${v}`, cls: v===minBid?'primary':'', fn:()=>{
       hideOverlay();
-      if(rd.starter==null) rd.starter = MY_SEAT;
       rd.highBid = v; rd.highBidder = MY_SEAT;
-      logMsg(v===minBid && isReclaim ? `You match ${v} (started the auction).` : `You bid ${v}.`);
-      advanceBid(MY_SEAT);
+      logMsg(`You bid ${v}${mustBid?' (forced, everyone else passed)':''}.`);
+      advanceBidding(MY_SEAT);
       pushState();
     }});
   }
-  btns.push({label:'Pass', cls:'ghost', fn:()=>{
-    hideOverlay();
-    rd.passed.push(MY_SEAT);
-    logMsg('You pass.');
-    advanceBid(MY_SEAT);
-    pushState();
-  }});
-  const explain = (isReclaim
-    ? `Current high bid: ${rd.highBid}. You started this auction, so you can re-claim it at ${rd.highBid} or bid higher.`
+  if(!mustBid){
+    btns.push({label:'Pass', cls:'ghost', fn:()=>{
+      hideOverlay();
+      rd.passed.push(MY_SEAT);
+      logMsg('You pass.');
+      advanceBidding(MY_SEAT);
+      pushState();
+    }});
+  }
+  const explain = (mustBid
+    ? 'Everyone else passed — as dealer, you must choose a bid between 16 and 28. You cannot pass.'
     : `Current high bid: ${rd.highBid||'none'}. You must bid higher, or pass.`)
     + '\n\n' + biddingStatusText();
-  showOverlay('Your Bid', explain, btns);
+  showOverlay(mustBid ? 'Everyone Passed' : 'Your Bid', explain, btns);
 }
 function finishBidding(){
   const rd = G.round;
@@ -941,35 +920,6 @@ function finishBidding(){
   rd.awaiting = {type:'trump', seat: rd.highBidder};
   doTrumpStep(rd.highBidder);
   pushState();
-}
-function doDealerForcedBid(seat){
-  if(!authorizedFor(seat)){
-    clearDecisionUI();
-    setPanelMsg(`Everyone passed — waiting for ${seatLabel(seat)} (the dealer) to bid...`);
-    return;
-  }
-  const rd = G.round;
-  if(seat===MY_SEAT){
-    setPanelMsg('Everyone passed — as dealer you must bid.');
-    setPanelBtns([]);
-    const btns = [];
-    for(let v=16; v<=28; v++){
-      btns.push({label:`Bid ${v}`, cls: v===16?'primary':'', fn:()=>{
-        hideOverlay();
-        rd.starter = MY_SEAT; rd.highBid = v; rd.highBidder = MY_SEAT;
-        logMsg(`Everyone passed — as dealer, you bid ${v}.`);
-        finishBidding();
-      }});
-    }
-    showOverlay('Everyone Passed', 'As dealer, you must choose a bid between 16 and 28 — you cannot pass.\n\n'+biddingStatusText(), btns);
-    return;
-  }
-  // computer dealer: forced to pick something, so just use their comfort estimate (floor 16)
-  const {score} = handStrength(rd.hands[seat]);
-  const bid = Math.max(16, Math.min(28, Math.round(16+score/3)));
-  rd.starter = seat; rd.highBid = bid; rd.highBidder = seat;
-  logMsg(`Everyone passed — as dealer, ${pname(seat)} must bid ${bid}.`);
-  finishBidding();
 }
 
 /* ---------------- TRUMP ---------------- */
@@ -1126,7 +1076,7 @@ function doBidDoubleOfferStep(){
             rd2.bidDoubleSkipped = rd2.bidDoubleSkipped||[]; rd2.bidDoubleSkipped.push(opp);
             checkBidDoubleResolution();
           }
-        }, 150+Math.random()*150);
+        }, 600+Math.random()*400);
         return;
       }
     }
@@ -1191,7 +1141,7 @@ function doRedoubleOfferStep(){
             rd2.redoubleSkipped = rd2.redoubleSkipped||[]; rd2.redoubleSkipped.push(s);
             checkRedoubleResolution();
           }
-        }, 150+Math.random()*150);
+        }, 600+Math.random()*400);
         return;
       }
     }
@@ -1316,7 +1266,7 @@ function doSinglesOfferStep(){
             announce(`${seatLabel(s)} chose No Single.`);
             checkSinglesResolution();
           }
-        }, 150+Math.random()*150);
+        }, 600+Math.random()*400);
         return;
       }
     }
@@ -1434,7 +1384,7 @@ function playTurn(seat){
   else { setTimeout(()=>{
     if(!G || !G.round || G.round.awaiting.type!=='play' || G.round.awaiting.seat!==seat) return;
     computerPlay(seat, legalCards(seat));
-  }, 200); }
+  }, 700); }
 }
 function legalIsDiscardOnly(seat){
   const rd = G.round;
@@ -1616,7 +1566,7 @@ function playCard(seat, card, opts){
   if(playedSeats.length + outCount === 4){
     rd.awaiting = {type:'trickPause'};
     pushState();
-    setTimeout(resolveTrick, 2500);
+    setTimeout(resolveTrick, 2000);
   } else {
     playTurn(nextSeat(seat));
     pushState();
@@ -1669,7 +1619,7 @@ function resolveTrick(){
     rd.leader = winner.seat;
     rd.awaiting = {type:'play', seat: winner.seat};
     pushState();
-    setTimeout(()=>playTurn(winner.seat), 50);
+    setTimeout(()=>playTurn(winner.seat), 100);
   }
 }
 
